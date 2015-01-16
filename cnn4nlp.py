@@ -128,7 +128,8 @@ class ConvFoldingPoolLayer(object):
                 dtype = theano.config.floatX
             ),
             name = "b",
-            borrow = True)
+            borrow = True
+        )
 
         self.params = [self.W, self.b]
         
@@ -267,7 +268,7 @@ def train_and_test(learning_rate,
 
     updates = [(param, param - learning_rate * T.grad(cost, param))
                for param in params] # to be filled    
-    
+
     train_model = theano.function(inputs = [word_indices, sent_label],
                                   outputs = cost, 
                                   updates = updates,
@@ -277,10 +278,12 @@ def train_and_test(learning_rate,
         
     # given sentence and its label, predict the sentiment label
     classify = theano.function(inputs = [word_indices],
-                               outputs = model.pred_y, 
+                               outputs = model.pred_y[0],
     )
     
     def accuracy(xs, ys):
+        # print [(classify(x), y)
+        #        for x, y in zip(xs, ys)]
         correct_n = len([1 for x, y in zip(xs, ys) if classify(x) == y])
         return correct_n / float(len(xs))
     
@@ -298,12 +301,16 @@ def train_and_test(learning_rate,
     start_time = time.clock()
     done_looping = False
     epoch = 0
+
+    train_instances_indices = np.arange(len(train_set_x))
+    
     while (epoch < n_epochs) and (not done_looping):
         epoch += 1
         print "At epoch {epoch}".format(epoch = epoch)
-
-        for train_instance_index in xrange(len(train_set_x)):
-
+        
+        np.random.shuffle(train_instances_indices) # shuffle the training instances
+        
+        for trained_instance_count, train_instance_index in enumerate(train_instances_indices):
             train_err = train_model(
                 train_set_x[train_instance_index], 
                 train_set_y[train_instance_index]
@@ -311,24 +318,24 @@ def train_and_test(learning_rate,
             
             layer1.normalize() # normalize the word embedding
             
-            if train_instance_index % 100 == 0 or train_instance_index == len(train_set_x) - 1:
+            if trained_instance_count % 100 == 0 or trained_instance_count == len(train_set_x) - 1:
                 print "%d / %d instances finished" %(
-                    train_instance_index,
+                    trained_instance_count,
                     len(train_set_x)
                 )
-        
-                print "validation error %.2f %%" %(
+
+                print "validation accuracy %.2f %%" %(
                     accuracy(
                         valid_set_x, 
                         valid_set_y
-                    )
+                    ) * 100
                 )
 
-                print "test error %.2f %%" %(
+                print "test accuracy %.2f %%" %(
                     accuracy(
                         test_set_x, 
                         test_set_y
-                    )
+                    ) * 100
                 )
             
     end_time = time.clock()
