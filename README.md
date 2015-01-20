@@ -1,7 +1,7 @@
 # twitter-sent-dnn
 Deep Neural Network(DNN) for Sentiment Analysis on Twitter
 
-# Contributors
+## Contributors
 Han Xiao and Yao Lu
 
 ## What is it
