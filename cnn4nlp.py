@@ -59,7 +59,27 @@ class WordEmbeddingLayer(object):
                 made to be 4D to fit into the dimension of convolution operation
         """
         return (self.embeddings[word_indices]).dimshuffle('x', 'x', 1, 0)
+
+class DropoutLayer(object):
+    """
+    As the name suggests
+
+    Refer to here: https://github.com/mdenil/dropout/blob/master/mlp.py
+    """
+
+    def __init__(self, input, rng, dropout_rate):
+
+        srng = theano.tensor.shared_randomstreams.RandomStreams(
+            rng.randint(999999))
         
+        # p=1-p because 1's indicate keep and p is prob of dropping
+        mask = srng.binomial(n=1, 
+                             p=1-dropout_rate, 
+                             size=input.shape)
+        
+        self.output = input * T.cast(mask, theano.config.floatX)
+        
+    
 class ConvFoldingPoolLayer(object):
     """
     Convolution, folding and k-max pooling layer
@@ -96,7 +116,7 @@ class ConvFoldingPoolLayer(object):
             fan_in = np.prod(filter_shape[1:])
             
             fan_out = (filter_shape[0] * np.prod(filter_shape[2:]) / 
-                       5.) # for now, assume the sentence average length is 5
+                       5.) # for now, assume the k value is 5
             
             W_bound = np.sqrt(6. / (fan_in + fan_out))
             
@@ -194,9 +214,9 @@ class ConvFoldingPoolLayer(object):
         return T.tanh(pool_out)
 
 def train_and_test(learning_rate, 
-                   nkerns = [6, 14],
+                   nkerns = [6, 12],
                    embed_dm = 48,
-                   k_top = 4,
+                   k_top = 5,
                    L1_reg=0.00, L2_reg=0.0001,
                    n_hidden = 500,
                    n_epochs = 2000):
@@ -216,20 +236,29 @@ def train_and_test(learning_rate,
     word_indices = T.ivector('word_indices') # the vector of word indices
     sent_label = T.iscalar('sent_label') # the sentence sentiment label
     
+    lr = T.dscalar('learning_rate')
+    
     rng = np.random.RandomState(1234)
     
     # Layer 1, the embedding layer
-    layer1 = WordEmbeddingLayer(rng, len(word2index), 
-                                embed_dm = embed_dm)
+    layer1 = WordEmbeddingLayer(rng, 
+                                len(word2index), 
+                                embed_dm = embed_dm)    
     
     # Layer 2: convolution&fold&pool layer
     filter_shape = (nkerns[0],
                     1, 
-                    1, 7 # will 7 be too large?
+                    1, 10
+    )
+    
+    dropout_layer = DropoutLayer(
+        input = layer1.output(word_indices),
+        rng = rng, 
+        dropout_rate = 0.2
     )
     
     layer2 = ConvFoldingPoolLayer(rng, 
-                                  input = layer1.output(word_indices), 
+                                  input = dropout_layer.output, 
                                   filter_shape = filter_shape)
     layer2_k = T.cast(T.max([k_top, 
                              T.ceil(.5 * word_indices.shape[0])]), 
@@ -239,20 +268,34 @@ def train_and_test(learning_rate,
     # Layer 3: convolution&fold&pool layer
     filter_shape = (nkerns[1], 
                     nkerns[0],
-                    1, 5 # will 5 be too large?
+                    1, 7 
+    )
+    
+    dropout_layer = DropoutLayer(
+        input = layer2.output(layer2_k),
+        rng = rng, 
+        dropout_rate = 0.3
     )
     
     layer3 = ConvFoldingPoolLayer(rng, 
-                                  input = layer2.output(layer2_k),
+                                  input = dropout_layer.output,
                                   filter_shape = filter_shape)
     
-    layer4_input = (layer3
-                    .output(k_top)
-                    .flatten(2)) #make it into a row 
+    dropout_layer = DropoutLayer(
+        input = layer3.output(k_top),
+        rng = rng, 
+        dropout_rate = 0.4
+    )
+    
+    layer4_input = dropout_layer.output.flatten(2) #make it into a row 
+    
+    layer4 = DropoutLayer(input = layer4_input, 
+                          rng = rng, 
+                          dropout_rate = 0.5)
     
     # Softmax Layer
     model = LogisticRegression(
-        input = layer4_input, 
+        input = layer4.output, 
         n_in = nkerns[1] * k_top * embed_dm / 4, # we fold twice, so divide by 4
         n_out = len(possible_labels) # five sentiment level
     )
@@ -266,10 +309,10 @@ def train_and_test(learning_rate,
     # pdb.set_trace()
     params = (layer1.params + layer2.params + layer3.params + model.params)
 
-    updates = [(param, param - learning_rate * T.grad(cost, param))
+    updates = [(param, param - lr * T.grad(cost, param))
                for param in params] # to be filled    
 
-    train_model = theano.function(inputs = [word_indices, sent_label],
+    train_model = theano.function(inputs = [word_indices, sent_label, lr],
                                   outputs = cost, 
                                   updates = updates,
                                   mode = THEANO_COMPILE_MODE, 
@@ -301,42 +344,54 @@ def train_and_test(learning_rate,
     start_time = time.clock()
     done_looping = False
     epoch = 0
-
+    
+    learning_rate_decay_step = learning_rate / 10
+    
     train_instances_indices = np.arange(len(train_set_x))
     
     while (epoch < n_epochs) and (not done_looping):
         epoch += 1
         print "At epoch {epoch}".format(epoch = epoch)
         
+        if epoch > 0:
+            print "learning_rate = %f" %(learning_rate)
+            learning_rate -= learning_rate_decay_step
+
+        if learning_rate <= 0:
+            done_looping = True
+            
         np.random.shuffle(train_instances_indices) # shuffle the training instances
         
+
         for trained_instance_count, train_instance_index in enumerate(train_instances_indices):
             train_err = train_model(
                 train_set_x[train_instance_index], 
-                train_set_y[train_instance_index]
+                train_set_y[train_instance_index], 
+                learning_rate
             )
             
             layer1.normalize() # normalize the word embedding
             
-            if trained_instance_count % 100 == 0 or trained_instance_count == len(train_set_x) - 1:
+            if trained_instance_count % 2000 == 0:
+                
                 print "%d / %d instances finished" %(
                     trained_instance_count,
                     len(train_set_x)
                 )
 
-                print "validation accuracy %.2f %%" %(
-                    accuracy(
-                        valid_set_x, 
-                        valid_set_y
-                    ) * 100
-                )
-
-                print "test accuracy %.2f %%" %(
-                    accuracy(
-                        test_set_x, 
-                        test_set_y
-                    ) * 100
-                )
+        print "training accuracy %.2f %%" %(
+            accuracy(
+                train_set_x, 
+                train_set_y
+            ) * 100
+        )
+                
+        print "validation accuracy %.2f %%" %(
+            accuracy(
+                valid_set_x, 
+                valid_set_y
+            ) * 100
+        )
             
     end_time = time.clock()
     print(('Optimization complete. Best validation score of %f %% '
@@ -348,4 +403,4 @@ def train_and_test(learning_rate,
 
     
 if __name__ == "__main__":
-    train_and_test(0.001)
+    train_and_test(0.01)
