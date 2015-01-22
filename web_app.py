@@ -2,6 +2,7 @@ import tornado.ioloop
 import tornado.web
 import tornado.template
 import tweepy
+import numpy as np
 
 html = """
 <!DOCTYPE html>
@@ -95,18 +96,16 @@ class MainHandler(tornado.web.RequestHandler):
     def post(self):
         tweet = self.get_argument("tweet", default="") 	    
         hashtag = self.get_argument("hashtag", default="")      
-	print tweet
-	print hashtag
         t = tornado.template.Template(html)
 
 	if tweet:
-            self.write(t.generate(tweet_senti="0", hashtag_senti="0"))
+	    index = np.random.randn(1,1)[0][0]
+            self.write(t.generate(tweet_senti=str(index), hashtag_senti="0"))
 	elif hashtag:
     	    tweets = api.search(hashtag, count=100)
 	    tweets_text = [tt.text for tt in tweets]
-	    print tweets_text
-
-            self.write(t.generate(tweet_senti="0", hashtag_senti="0"))
+	    index = np.random.randn(1,1)[0][0]
+            self.write(t.generate(tweet_senti="0", hashtag_senti=str(index)))
 	else:
             self.write(t.generate(tweet_senti="0", hashtag_senti="0"))
 
