@@ -208,7 +208,8 @@ def tile_raster_images(X, img_shape, tile_shape, tile_spacing=(0, 0),
 def process_stanford_sentiment_corpus(train_path, dev_path, test_path, 
                                       pkl_path, 
                                       unk_threshold, 
-                                      unk_token= '<UNK>'):
+                                      unk_token= '<UNK>', 
+                                      pad_token= '<PADDING>'):
     """
     Input three paths for the PTB tree file of train/validate/test data
 
@@ -232,6 +233,11 @@ def process_stanford_sentiment_corpus(train_path, dev_path, test_path,
         test_sents, test_labels = zip(*[flatten_tree(parse(l)) 
                                         for l in test_f])
 
+    # gathering sentence length information
+    sent_max_len = max((len(sent) 
+                        for sent in train_sents))
+    print "sent_max_len: %d" %(sent_max_len)
+    
     # preprocess number to DIGIT
     # somewhat memory inefficient
     # and also to lowercase
@@ -261,29 +267,42 @@ def process_stanford_sentiment_corpus(train_path, dev_path, test_path,
 
     print "Vocab size: %d" %len(frequent_words)
     
+    # add the two additional words
     frequent_words.append(unk_token)
+    frequent_words.append(pad_token)
+    
     word2index = OrderedDict([(w, i)
                               for i, w in enumerate(frequent_words)])
     index2word = OrderedDict([(w, i)
                               for i, w in word2index.items()])
     
     
-
+    padding_index = word2index[pad_token]
+    print "padding_index = %d" %(padding_index)
+    
     print "Converting sentence to numpy array.."
-    sent2array = lambda sent: np.array([word2index.get(word, word2index[unk_token]) 
-                                        for word in sent],
-                                       dtype = "int32")
+    
+    sent2array_padded = lambda sent: (
+        [word2index.get(word, word2index[unk_token])  
+         for word in sent] +
+        [padding_index] * (sent_max_len - len(sent)) # add the paddings
+    ) 
+
+    sent2array_unpadded = lambda sent: [word2index.get(word, word2index[unk_token])
+                                        for word in sent]
+    
     # construct the sentence data,
     # each sentence is represented by the word indices
-    train_sents_array = [sent2array(sent)
-                         for sent in train_sents]
+    train_sents_array = np.array([sent2array_padded(sent)
+                                  for sent in train_sents],
+                                 dtype = "int32")
 
-    dev_sents_array = [sent2array(sent)
-                       for sent in dev_sents]
+    dev_sents_array = [np.array(sent2array_unpadded(sent), dtype = "int32")
+                       for sent in dev_sents] 
 
-    test_sents_array = [sent2array(sent)
-                        for sent in test_sents]
-    
+    test_sents_array = [np.array(sent2array_unpadded(sent), dtype = "int32")
+                        for sent in test_sents]                       
+
     pkl_data = ((train_sents_array, np.array(train_labels, dtype="int32")),
                 (dev_sents_array, np.array(dev_labels, dtype="int32")),
                 (test_sents_array, np.array(test_labels, dtype="int32")),
@@ -291,6 +310,7 @@ def process_stanford_sentiment_corpus(train_path, dev_path, test_path,
                 index2word
     )
     
+    print "dumping pickle to %s" %(pkl_path)
     pickle.dump(pkl_data, open(pkl_path, 'w'))
 
     return pkl_data
@@ -322,5 +342,4 @@ if __name__ == "__main__":
                                       'data/stanfordSentimentTreebank/trees/dev.txt', 
                                       'data/stanfordSentimentTreebank/trees/test.txt', 
                                       'data/stanfordSentimentTreebank/trees/processed.pkl', 
-                                      unk_threshold = 2, 
-                                      unk_token= '<UNK>')
+                                      unk_threshold = 3)
