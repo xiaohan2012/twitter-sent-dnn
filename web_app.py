@@ -99,12 +99,12 @@ class MainHandler(tornado.web.RequestHandler):
         t = tornado.template.Template(html)
 
 	if tweet:
-	    index = np.random.randn(1,1)[0][0]
+	    index = np.random.randn()
             self.write(t.generate(tweet_senti=str(index), hashtag_senti="0"))
 	elif hashtag:
     	    tweets = api.search(hashtag, count=100)
 	    tweets_text = [tt.text for tt in tweets]
-	    index = np.random.randn(1,1)[0][0]
+	    index = np.random.randn()
             self.write(t.generate(tweet_senti="0", hashtag_senti=str(index)))
 	else:
             self.write(t.generate(tweet_senti="0", hashtag_senti="0"))
