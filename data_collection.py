@@ -9,8 +9,6 @@ json = import_simplejson()
 consumer_key = "ncMZ2CP7YmScHkLYwmfCYaTZz"
 consumer_secret = "ZkFEJXxXEOUlqkhrJ14kzWakrXjqIe11de7ks28DyC79P31t9q"
 
-# After the step above, you will be redirected to your app's page.
-# Create an access token under the the "Your access token" section
 access_token = "1157786504-XB3DXGrMmhvM1PAb6aeys3LJFYI9Y3LzS6veRHj"
 access_token_secret = "8w69uDRm9PPA9iv3fNtkHPKP4FIq5SFtVbcE28wtcY5qx"
 
@@ -18,10 +16,6 @@ pos_emo = [":)", ":-)", ": )", ":D", "=)", ";)"]
 neg_emo = [":(", ":-(", ": ("]
 emo = pos_emo + neg_emo
 class StdOutListener(StreamListener):
-    """ A listener handles tweets are the received from the stream.
-    This is a basic listener that just prints received tweets to stdout.
-
-    """
 
     def on_data(self, raw_data):
         data = json.loads(raw_data)
