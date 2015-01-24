@@ -46,7 +46,7 @@ class StdOutListener(StreamListener):
         if not text:
             return True 
 
-        line = "\"" + str(emo_idx) + "\"," + "\"" + text + "\""
+        line = "\"" + str(emo_idx) + "\"," + "\"" + text + "\"\n"
         with open('data_collected.csv', 'a') as f:
 	    f.write(line)
 	
