@@ -19,17 +19,28 @@ class WordEmbeddingLayer(object):
     Layer that takes input vectors, output the sentence matrix
     """
     def __init__(self, rng, 
+                 input,
                  vocab_size, 
                  embed_dm):
         """
+        input: theano.tensor.dmatrix, (number of instances, sentence word number)
+        
         vocab_size: integer, the size of vocabulary,
 
         embed_dm: integer, the dimension of word vector representation
-        """
+        """                
+        # # Note:
+        # # assume the padding is the last row
+        # # and it's constant to 0
+        # pad_val = np.zeros((1, embed_dm))
+        
+        # embed_val = np.concatenate((embed_val_except_pad, pad_val), 
+        #                            axis = 0)
+        
         self.embeddings = theano.shared(
             np.asarray(rng.uniform(
-                low = -0.1,
-                high = 0.1,
+                low = -1,
+                high = 1,
                 size = (vocab_size, embed_dm)
             ), 
                        dtype = theano.config.floatX),
@@ -39,27 +50,30 @@ class WordEmbeddingLayer(object):
         
         self.params = [self.embeddings]
         
+        self.param_shapes = [(vocab_size, embed_dm)]
+        
+        # updated_embeddings = self.embeddings[:-1] # all rows are updated except for the last row
+        
         self.normalize = theano.function(inputs = [],
                                          updates = { self.embeddings:
-                                                     (self.embeddings / 
+                                                     (self.embeddings/ 
                                                       T.sqrt((self.embeddings**2).sum(axis=1)).dimshuffle(0,'x'))
                                                  }
         )
 
         self.normalize() #initial normalization
 
-    def output(self, word_indices):
-        """
-        word_indices: theano.tensor.ivector, word indices of the sentence
-
-        Return:
+        # Return:
         
-        :type, theano.tensor.tensor4
-        :param, dimension(1, 1, word embedding dimension, number of words in sentence)
-                made to be 4D to fit into the dimension of convolution operation
-        """
-        return (self.embeddings[word_indices]).dimshuffle('x', 'x', 1, 0)
-
+        # :type, theano.tensor.tensor4
+        # :param, dimension(1, 1, word embedding dimension, number of words in sentence)
+        #         made to be 4D to fit into the dimension of convolution operation
+        sent_embedding_list, updates = theano.map(lambda sent: self.embeddings[sent], 
+                                                  input)
+        sent_embedding_tensor = T.stacklists(sent_embedding_list) # make it into a 3D tensor
+        
+        self.output = sent_embedding_tensor.dimshuffle(0, 'x', 2, 1) # make it a 4D tensor
+        
 class DropoutLayer(object):
     """
     As the name suggests
@@ -88,16 +102,20 @@ class ConvFoldingPoolLayer(object):
                  rng, 
                  input,
                  filter_shape,
+                 k,
                  W = None,
                  b = None):
         """
         rng: numpy random number generator
         input: theano.tensor.tensor4
-               the sentence matrix, (1, number of input feature maps,  embedding dimension, number of words)
+               the sentence matrix, (number of instances, number of input feature maps,  embedding dimension, number of words)
         
         filter_shape: tuple of length 4, 
            dimension: (number of filters, num input feature maps, filter height, filter width)
         
+        k: int or theano.tensor.iscalar,
+           the k value in the max-pooling layer
+
         W: theano.tensor.tensor4,
            the filter weight matrices, 
            dimension: (number of filters, num input feature maps, filter height, filter width)
@@ -109,14 +127,14 @@ class ConvFoldingPoolLayer(object):
         """
         self.input = input
         self.filter_shape = filter_shape
-        
+
         if W is not None:
             W_val = W
         else:
             fan_in = np.prod(filter_shape[1:])
             
             fan_out = (filter_shape[0] * np.prod(filter_shape[2:]) / 
-                       5.) # for now, assume the k value is 5
+                       k) # it's 
             
             W_bound = np.sqrt(6. / (fan_in + fan_out))
             
@@ -152,7 +170,9 @@ class ConvFoldingPoolLayer(object):
         )
 
         self.params = [self.W, self.b]
-        
+        self.param_shapes = [filter_shape,
+                             b_size ]
+
     def fold(self, x):
         """
         :type x: theano.tensor.tensor4
@@ -165,37 +185,24 @@ class ConvFoldingPoolLayer(object):
         perform k-max pool on the input along the rows
 
         input: theano.tensor.tensor4
+           
         k: theano.tensor.iscalar
-        
+            the k parameter
+
         Returns: 
         4D tensor
         """
+        ind = T.argsort(x, axis = 3)
+
+        sorted_ind = T.sort(ind[:,:,:, -k:], axis = 3)
         
-        x0 = x[0] # we only use the first element
-        ind = T.argsort(x0, axis = 2)
-
-        sorted_ind = T.sort(ind[:,:, 0:k], axis = 2)
-
-        ind = T.argsort(x0, axis = 2)
-
-        sorted_ind = T.sort(ind[:, :, -k:], axis = 2)
-
-        first = T.arange(x0.shape[0]).repeat(x0.shape[1] * k)
-        second = T.tile(
-            T.arange(x0.shape[1])
-            .repeat(k)
-            .dimshuffle((0, 'x')), # make it into a 2d matrix
-            (self.filter_shape[0], 1)
-        ).reshape((1, T.prod(sorted_ind.shape)))
-
-
-        return (
-            x0[first, 
-               second, 
-               sorted_ind.flatten()]
-            .reshape(sorted_ind.shape)
-            .dimshuffle('x', 0, 1, 2) # make it back to 4D
-        )
+        dim0, dim1, dim2, dim3 = sorted_ind.shape
+        
+        indices_dim0 = T.arange(dim0).repeat(dim1 * dim2 * dim3)
+        indices_dim1 = T.arange(dim1).repeat(dim2 * dim3).reshape((dim1*dim2*dim3, 1)).repeat(dim0, axis=1).T.flatten()
+        indices_dim2 = T.arange(dim2).repeat(dim3).reshape((dim2*dim3, 1)).repeat(dim0 * dim1, axis = 1).T.flatten()
+        
+        return x[indices_dim0, indices_dim1, indices_dim2, sorted_ind.flatten()].reshape(sorted_ind.shape)
 
     def output(self, k):
         # non-linear transform of the convolution output
@@ -213,16 +220,21 @@ class ConvFoldingPoolLayer(object):
         # non-linearity
         return T.tanh(pool_out)
 
-def train_and_test(learning_rate, 
-                   nkerns = [6, 12],
-                   embed_dm = 48,
-                   k_top = 5,
-                   L1_reg=0.00, L2_reg=0.0001,
-                   n_hidden = 500,
-                   n_epochs = 2000):
+def train_and_test(
+        learning_rate = 0.1,
+        epsilon = 0.0001,
+        rho = 0.95,
+        nkerns = [6, 12],
+        embed_dm = 48,
+        k_top = 5,
+        n_hidden = 500,
+        batch_size = 500,
+        n_epochs = 2000):
 
-    # get the data
-    datasets = util.stanford_sentiment('data/stanfordSentimentTreebank/trees/processed.pkl.3',
+    ###################
+    # get the data    #
+    ###################
+    datasets = util.stanford_sentiment('data/stanfordSentimentTreebank/trees/processed.pkl',
                                        corpus_folder = 'data/stanfordSentimentTreebank/trees/')
     
     train_set_x, train_set_y = datasets[0]
@@ -231,18 +243,31 @@ def train_and_test(learning_rate,
     word2index = datasets[3]
     index2word = datasets[4]
 
-    possible_labels =  set(train_set_y.tolist())
+    n_train_batches = train_set_x.get_value(borrow=True).shape[0] / batch_size
+    train_sent_len = train_set_x.get_value(borrow=True).shape[1]
+    possible_labels =  set(train_set_y.get_value().tolist())
     
-    word_indices = T.ivector('word_indices') # the vector of word indices
-    sent_label = T.iscalar('sent_label') # the sentence sentiment label
     
-    lr = T.dscalar('learning_rate')
+    ###################################
+    # Symbolic variable definition    #
+    ###################################
+    x = T.imatrix('x') # the word indices matrix
+    sent_len = x.shape[1]
+    y = T.ivector('y') # the sentiment labels
+
+    batch_index = T.iscalar('batch_index')
     
-    rng = np.random.RandomState(1234)
+    rng = np.random.RandomState(1234)        
+        
     
+    ###############################
+    # Construction of the network #
+    ###############################
+
     # Layer 1, the embedding layer
     layer1 = WordEmbeddingLayer(rng, 
-                                len(word2index), 
+                                input = x, 
+                                vocab_size = len(word2index), 
                                 embed_dm = embed_dm)    
     
     # Layer 2: convolution&fold&pool layer
@@ -251,19 +276,13 @@ def train_and_test(learning_rate,
                     1, 10
     )
     
-    dropout_layer = DropoutLayer(
-        input = layer1.output(word_indices),
-        rng = rng, 
-        dropout_rate = 0.2
-    )
-    
+    layer2_k = int(max(k_top, 
+                       math.ceil(.5 * train_sent_len)))
+
     layer2 = ConvFoldingPoolLayer(rng, 
-                                  input = dropout_layer.output, 
-                                  filter_shape = filter_shape)
-    layer2_k = T.cast(T.max([k_top, 
-                             T.ceil(.5 * word_indices.shape[0])]), 
-                      'int32'
-                  ) # to int32 for slicing
+                                  input = layer1.output, 
+                                  filter_shape = filter_shape, 
+                                  k = layer2_k)
     
     # Layer 3: convolution&fold&pool layer
     filter_shape = (nkerns[1], 
@@ -271,72 +290,119 @@ def train_and_test(learning_rate,
                     1, 7 
     )
     
-    dropout_layer = DropoutLayer(
-        input = layer2.output(layer2_k),
-        rng = rng, 
-        dropout_rate = 0.3
-    )
-    
     layer3 = ConvFoldingPoolLayer(rng, 
-                                  input = dropout_layer.output,
-                                  filter_shape = filter_shape)
+                                  input = layer2.output(layer2_k),
+                                  filter_shape = filter_shape, 
+                                  k = k_top)
     
-    dropout_layer = DropoutLayer(
+    # Hiddne layer: dropout layer
+    layer4 = DropoutLayer(
         input = layer3.output(k_top),
         rng = rng, 
-        dropout_rate = 0.4
+        dropout_rate = 0.5
     )
     
-    layer4_input = dropout_layer.output.flatten(2) #make it into a row 
+    layer4_input = layer4.output.flatten(2) #make it into a row 
     
-    layer4 = DropoutLayer(input = layer4_input, 
-                          rng = rng, 
-                          dropout_rate = 0.5)
     
     # Softmax Layer
     model = LogisticRegression(
-        input = layer4.output, 
+        input = layer4_input, 
         n_in = nkerns[1] * k_top * embed_dm / 4, # we fold twice, so divide by 4
         n_out = len(possible_labels) # five sentiment level
     )
-           
-    # Using model.nnl will cause unkown optimization error..
-    # so be more direct
-    cost = -T.log(model.p_y_given_x)[0, sent_label]
+
+    ############################
+    # Training function and    #
+    # AdaDelta learning rate   #
+    ############################
+    cost = model.nnl(y)
         
-    # theano.printing.debugprint(cost)
-    
-    # pdb.set_trace()
     params = (layer1.params + layer2.params + layer3.params + model.params)
+    param_shapes=  (layer1.param_shapes + layer2.param_shapes + layer3.param_shapes + model.param_shapes)
+    
+    # AdaDelta parameter symbols
+    # E[g^2]
+    # initialized to zero
+    egs = [
+        theano.shared(
+            value = np.zeros(param_shape,
+                             dtype = theano.config.floatX
+                         ),
+            borrow = True,        
+            name = "Eg:" + param.name
+        )
+        for param_shape, param in zip(param_shapes, params)
+    ]
+    
+    # E[\delta x^2]
+    # initialized to zero
+    exs = [
+        theano.shared(
+            value = np.zeros(param_shape,
+                             dtype = theano.config.floatX
+                         ),
+            borrow = True,        
+            name = "Ex:" + param.name
+        )
+        for param_shape, param in zip(param_shapes, params)
+    ]
+    
+    param_grads = [T.grad(cost, param) for param in params]
+    
+    # AdaDelta parameter update
+    # Update E[g^2]
 
-    updates = [(param, param - lr * T.grad(cost, param))
-               for param in params] # to be filled    
+    # updates = [
+    #     (eg, rho * eg + (1 - rho) * T.pow(param_grad, 2))
+    #     for eg, param_grad, param_shape in zip(egs, param_grads, param_shapes)
+    # ]
+    
+    # # More updates for the gradients
+    # param_updates = [
+    #     (param, param - (T.sqrt(ex + epsilon) / T.sqrt(eg + epsilon)) * param_grad)
+    #     for eg, ex, param, param_grad in zip(egs, exs, params, param_grads)
+    # ]
+    
+    # updates +=  param_updates
+    
+    # # Last, updates for E[x^2]
+    # updates += [
+    #     (ex, rho * ex + (1 - rho) * T.pow(param_update[1], 2))
+    #     for ex, param_update in zip(exs, param_updates)
+    # ]
 
-    train_model = theano.function(inputs = [word_indices, sent_label, lr],
+    updates = [
+        (param, param - 0.01 * param_grad)
+        for param, param_grad in zip(params, param_grads)
+    ]
+    
+    train_model = theano.function(inputs = [batch_index],
                                   outputs = cost, 
                                   updates = updates,
-                                  mode = THEANO_COMPILE_MODE, 
-                                  # mode = "FAST_RUN", 
+                                  givens = {
+                                      x: train_set_x[batch_index * batch_size: (batch_index + 1) * batch_size],
+                                      y: train_set_y[batch_index * batch_size: (batch_index + 1) * batch_size]
+                                  }
     )
         
-    # given sentence and its label, predict the sentiment label
-    classify = theano.function(inputs = [word_indices],
-                               outputs = model.pred_y[0],
+    
+    valid_model = theano.function(inputs = [],
+                                  outputs = model.errors(y), 
+                                  givens = {
+                                      x: valid_set_x,
+                                      y: valid_set_y
+                                  }
     )
     
-    def accuracy(xs, ys):
-        # print [(classify(x), y)
-        #        for x, y in zip(xs, ys)]
-        correct_n = len([1 for x, y in zip(xs, ys) if classify(x) == y])
-        return correct_n / float(len(xs))
-    
-    # sys.exit(-1)
     #the training loop
     patience = 10000  # look as this many examples regardless
     patience_increase = 2  # wait this much longer when a new best is
                                   # found
     improvement_threshold = 0.995  # a relative improvement of this much is
                                   # considered significant
+
+    validation_frequency = min(n_train_batches, patience / 2)
 
     best_validation_loss = np.inf
     best_iter = 0
@@ -345,54 +411,29 @@ def train_and_test(learning_rate,
     done_looping = False
     epoch = 0
     
-    learning_rate_decay_step = learning_rate / 10
-    
-    train_instances_indices = np.arange(len(train_set_x))
-    
     while (epoch < n_epochs) and (not done_looping):
         epoch += 1
-        print "At epoch {epoch}".format(epoch = epoch)
+        print "At epoch {0}".format(epoch)
         
-        if epoch > 0:
-            print "learning_rate = %f" %(learning_rate)
-            learning_rate -= learning_rate_decay_step
+        for minibatch_index in xrange(n_train_batches):
 
-        if learning_rate <= 0:
-            done_looping = True
-            
-        np.random.shuffle(train_instances_indices) # shuffle the training instances
-        
-
-        for trained_instance_count, train_instance_index in enumerate(train_instances_indices):
-            train_err = train_model(
-                train_set_x[train_instance_index], 
-                train_set_y[train_instance_index], 
-                learning_rate
-            )
+            train_error = train_model(minibatch_index)
             
             layer1.normalize() # normalize the word embedding
             
-            if trained_instance_count % 2000 == 0:
-                
-                print "%d / %d instances finished" %(
-                    trained_instance_count,
-                    len(train_set_x)
-                )
 
-        print "training accuracy %.2f %%" %(
-            accuracy(
-                train_set_x, 
-                train_set_y
-            ) * 100
-        )
-                
-        print "validation accuracy %.2f %%" %(
-            accuracy(
-                valid_set_x, 
-                valid_set_y
-            ) * 100
-        )
+            # iteration number
+            iter = (epoch - 1) * n_train_batches + minibatch_index
             
+            # if (iter + 1) % validation_frequency == 0:
+                
+            dev_error = valid_model()
+            print "At epoch %d and minibatch %d. Dev error %.2f%%" %(
+                epoch, 
+                minibatch_index,
+                dev_error * 100
+            )
+        
     end_time = time.clock()
     print(('Optimization complete. Best validation score of %f %% '
            'obtained at iteration %i, with test performance %f %%') %
@@ -403,4 +444,4 @@ def train_and_test(learning_rate,
 
     
 if __name__ == "__main__":
-    train_and_test(0.01)
+    train_and_test(learning_rate = 0.1)

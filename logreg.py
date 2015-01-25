@@ -18,14 +18,14 @@ class LogisticRegression(object):
         :param n_out: number of output units, the dimension of the space in
                       which the labels lie
 
-        """
+        """        
         self.W = theano.shared(value = np.zeros((n_in, n_out), 
                                                 dtype = theano.config.floatX),
-                               name = 'W',
+                               name = 'logreg_W',
                                borrow = True)
-        self.b = theano.shared(value = np.zeros(n_out, 
+        self.b = theano.shared(value = np.zeros((n_out, ), 
                                                 dtype = theano.config.floatX),
-                               name = 'b',
+                               name = 'logreg_b',
                                borrow = True)
 
         # the probability of labels given the data
@@ -35,6 +35,7 @@ class LogisticRegression(object):
         self.pred_y = T.argmax(self.p_y_given_x, axis = 1)
 
         self.params = [self.W, self.b]
+        self.param_shapes = [(n_in, n_out), (n_out, )]
 
     def nnl(self, y):
         """
@@ -186,3 +187,4 @@ def train_and_test(learning_rate, batch_size,
 
 if __name__ == "__main__":
     train_and_test(0.01, 600)
+    

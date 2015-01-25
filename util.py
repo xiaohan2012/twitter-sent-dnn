@@ -234,9 +234,17 @@ def process_stanford_sentiment_corpus(train_path, dev_path, test_path,
                                         for l in test_f])
 
     # gathering sentence length information
-    sent_max_len = max((len(sent) 
-                        for sent in train_sents))
-    print "sent_max_len: %d" %(sent_max_len)
+    train_sent_max_len = max((len(sent) 
+                              for sent in train_sents))
+    print "train_sent_max_len: %d" %(train_sent_max_len)
+
+    dev_sent_max_len = max((len(sent) 
+                              for sent in dev_sents))
+    print "dev_sent_max_len: %d" %(dev_sent_max_len)
+
+    test_sent_max_len = max((len(sent) 
+                              for sent in test_sents))
+    print "test_sent_max_len: %d" %(test_sent_max_len)
     
     # preprocess number to DIGIT
     # somewhat memory inefficient
@@ -282,37 +290,52 @@ def process_stanford_sentiment_corpus(train_path, dev_path, test_path,
     
     print "Converting sentence to numpy array.."
     
-    sent2array_padded = lambda sent: (
+    sent2array_padded = lambda sent, max_len: (
         [word2index.get(word, word2index[unk_token])  
          for word in sent] +
-        [padding_index] * (sent_max_len - len(sent)) # add the paddings
+        [padding_index] * (max_len - len(sent)) # add the paddings
     ) 
-
-    sent2array_unpadded = lambda sent: [word2index.get(word, word2index[unk_token])
-                                        for word in sent]
+    
+    # sent2array_unpadded = lambda sent: [word2index.get(word, word2index[unk_token])
+    #                                     for word in sent]
     
     # construct the sentence data,
     # each sentence is represented by the word indices
-    train_sents_array = np.array([sent2array_padded(sent)
-                                  for sent in train_sents],
-                                 dtype = "int32")
+    def create_dataset(sents, labels, sent_max_len):
+        x = np.array([sent2array_padded(sent, sent_max_len)
+                      for sent in sents],
+                     dtype = "int32")
+        
+        y =np.array(labels, dtype="int32")
 
-    dev_sents_array = [np.array(sent2array_unpadded(sent), dtype = "int32")
-                       for sent in dev_sents] 
+        return x, y
 
-    test_sents_array = [np.array(sent2array_unpadded(sent), dtype = "int32")
-                        for sent in test_sents]                       
-
-    pkl_data = ((train_sents_array, np.array(train_labels, dtype="int32")),
-                (dev_sents_array, np.array(dev_labels, dtype="int32")),
-                (test_sents_array, np.array(test_labels, dtype="int32")),
-                word2index,
-                index2word
+    
+    train_x, train_y = create_dataset(train_sents, train_labels, train_sent_max_len)
+    dev_x, dev_y = create_dataset(dev_sents, dev_labels, dev_sent_max_len)
+    test_x, test_y = create_dataset(test_sents, test_labels, test_sent_max_len)
+    
+    pkl_data = (
+        (train_x, train_y),
+        (dev_x, dev_y),
+        (test_x, test_y),
+        word2index,
+        index2word
     )
     
     print "dumping pickle to %s" %(pkl_path)
     pickle.dump(pkl_data, open(pkl_path, 'w'))
 
+    debug = True
+    if debug:
+        print type(train_x)
+        print train_x[0]
+        print train_y[0]
+        print dev_x[0]
+        print dev_y[0]
+        print test_x[0]
+        print test_y[0]
+        
     return pkl_data
     
     
@@ -326,15 +349,26 @@ def stanford_sentiment(pkl_path, corpus_folder):
     """
     if not os.path.exists(pkl_path):
         print "Pickle file does not exist.\n Generate it."
-        d = process_stanford_sentiment_corpus(os.path.join(corpus_folder, 'train.txt'), 
-                                              os.path.join(corpus_folder, 'dev.txt'),
-                                              os.path.join(corpus_folder, 'test.txt'),
-                                              pkl_path = pkl_path, 
-                                              unk_threshold = 3)
-        return d
+        data = process_stanford_sentiment_corpus(os.path.join(corpus_folder, 'train.txt'), 
+                                                 os.path.join(corpus_folder, 'dev.txt'),
+                                                 os.path.join(corpus_folder, 'test.txt'),
+                                                 pkl_path = pkl_path, 
+                                                 unk_threshold = 3)
     else:
-        return pickle.load(open(pkl_path, 'r'))
+        data = pickle.load(open(pkl_path, 'r'))
+
+    def share_dataset(x, y):
+        shared_x = theano.shared(x, borrow = True)
         
+        shared_y = theano.shared(y, borrow = True)
+
+        return shared_x, shared_y
+
+    return (share_dataset(*data[0]), #train
+            share_dataset(*data[1]), #dev
+            share_dataset(*data[2]), #test
+            data[3], 
+            data[4])
         
 
 if __name__ == "__main__":
@@ -343,3 +377,4 @@ if __name__ == "__main__":
                                       'data/stanfordSentimentTreebank/trees/test.txt', 
                                       'data/stanfordSentimentTreebank/trees/processed.pkl', 
                                       unk_threshold = 3)
+    
