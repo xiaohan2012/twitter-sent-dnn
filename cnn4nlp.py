@@ -5,7 +5,7 @@ A Convolutional Neural Network for Modeling Sentence
 import sys, os, time
 import pdb
 
-import math
+import math, random
 import numpy as np
 import theano
 import theano.tensor as T
@@ -37,16 +37,21 @@ class WordEmbeddingLayer(object):
         # embed_val = np.concatenate((embed_val_except_pad, pad_val), 
         #                            axis = 0)
         
+        embedding_val = rng.uniform(
+            low = -1,
+            high = 1,
+            size = (vocab_size, embed_dm)
+        )
+        
+        embedding_val[vocab_size-1,:] = 0 # the <PAD> character is intialized to 0
+        
         self.embeddings = theano.shared(
-            np.asarray(rng.uniform(
-                low = -1,
-                high = 1,
-                size = (vocab_size, embed_dm)
-            ), 
+            np.asarray(embedding_val, 
                        dtype = theano.config.floatX),
             borrow = True,
             name = 'embeddings'
         )
+
         
         self.params = [self.embeddings]
         
@@ -54,14 +59,14 @@ class WordEmbeddingLayer(object):
         
         # updated_embeddings = self.embeddings[:-1] # all rows are updated except for the last row
         
-        self.normalize = theano.function(inputs = [],
-                                         updates = { self.embeddings:
-                                                     (self.embeddings/ 
-                                                      T.sqrt((self.embeddings**2).sum(axis=1)).dimshuffle(0,'x'))
-                                                 }
-        )
+        # self.normalize = theano.function(inputs = [],
+        #                                  updates = { self.embeddings:
+        #                                              (self.embeddings/ 
+        #                                               T.sqrt((self.embeddings**2).sum(axis=1)).dimshuffle(0,'x'))
+        #                                          }
+        # )
 
-        self.normalize() #initial normalization
+        # self.normalize() #initial normalization
 
         # Return:
         
@@ -90,7 +95,7 @@ class DropoutLayer(object):
         mask = srng.binomial(n=1, 
                              p=1-dropout_rate, 
                              size=input.shape)
-        
+
         self.output = input * T.cast(mask, theano.config.floatX)
         
     
@@ -126,6 +131,7 @@ class ConvFoldingPoolLayer(object):
                 
         """
         self.input = input
+        self.k = k
         self.filter_shape = filter_shape
 
         if W is not None:
@@ -137,11 +143,12 @@ class ConvFoldingPoolLayer(object):
                        k) # it's 
             
             W_bound = np.sqrt(6. / (fan_in + fan_out))
-            
+
             W_val = np.asarray(
                 rng.uniform(low=-W_bound, high=W_bound, size=filter_shape),
                 dtype=theano.config.floatX
             )
+
         self.W = theano.shared(
             value = np.asarray(W_val,
                                dtype = theano.config.floatX),
@@ -154,10 +161,9 @@ class ConvFoldingPoolLayer(object):
             b_val = b
         else:
             b_size = (filter_shape[0], )
-            b_val = rng.uniform(
-                low = -.5,
-                high = .5,
-                size = b_size
+            b_val = np.zeros(
+                b_size, 
+                dtype = theano.config.floatX
             )
             
         self.b = theano.shared(
@@ -203,8 +209,9 @@ class ConvFoldingPoolLayer(object):
         indices_dim2 = T.arange(dim2).repeat(dim3).reshape((dim2*dim3, 1)).repeat(dim0 * dim1, axis = 1).T.flatten()
         
         return x[indices_dim0, indices_dim1, indices_dim2, sorted_ind.flatten()].reshape(sorted_ind.shape)
-
-    def output(self, k):
+        
+    @property
+    def output(self):
         # non-linear transform of the convolution output
         conv_out = T.nnet.conv.conv2d(self.input, 
                                       self.W, 
@@ -214,22 +221,25 @@ class ConvFoldingPoolLayer(object):
         fold_out = self.fold(conv_out)
                 
         # k-max pool        
-        pool_out = (self.k_max_pool(fold_out, k) + 
+        pool_out = (self.k_max_pool(fold_out, self.k) + 
                     self.b.dimshuffle('x', 0, 'x', 'x'))
 
-        # non-linearity
-        return T.tanh(pool_out)
+        # use recitifer
+        return T.switch(pool_out > 0, pool_out, 0)
 
 def train_and_test(
+        use_aldadetla = True,
         learning_rate = 0.1,
-        epsilon = 0.0001,
+        epsilon = 0.000001,
         rho = 0.95,
         nkerns = [6, 12],
         embed_dm = 48,
         k_top = 5,
+        L2_reg=0.00001,
         n_hidden = 500,
         batch_size = 500,
-        n_epochs = 2000):
+        n_epochs = 2000, 
+        print_config = {}):
 
     ###################
     # get the data    #
@@ -291,13 +301,13 @@ def train_and_test(
     )
     
     layer3 = ConvFoldingPoolLayer(rng, 
-                                  input = layer2.output(layer2_k),
+                                  input = layer2.output,
                                   filter_shape = filter_shape, 
                                   k = k_top)
     
     # Hiddne layer: dropout layer
     layer4 = DropoutLayer(
-        input = layer3.output(k_top),
+        input = layer3.output,
         rng = rng, 
         dropout_rate = 0.5
     )
@@ -307,16 +317,28 @@ def train_and_test(
     
     # Softmax Layer
     model = LogisticRegression(
+        rng,
         input = layer4_input, 
         n_in = nkerns[1] * k_top * embed_dm / 4, # we fold twice, so divide by 4
         n_out = len(possible_labels) # five sentiment level
     )
 
     ############################
+    # L2 regularizer           #
+    ############################
+    
+    L2_sqr = (
+        0.0001 * (layer1.embeddings ** 2).sum()
+        + 0.00003 * (layer2.W ** 2).sum()
+        + 0.000003 * (layer3.W ** 2).sum()
+        + 0.0001 * (model.W ** 2).sum()
+    )
+    
+    ############################
     # Training function and    #
     # AdaDelta learning rate   #
     ############################
-    cost = model.nnl(y)
+    cost = model.nnl(y) + L2_sqr
         
     params = (layer1.params + layer2.params + layer3.params + model.params)
     param_shapes=  (layer1.param_shapes + layer2.param_shapes + layer3.param_shapes + model.param_shapes)
@@ -350,58 +372,147 @@ def train_and_test(
     
     param_grads = [T.grad(cost, param) for param in params]
     
-    # AdaDelta parameter update
-    # Update E[g^2]
+    if use_aldadetla:
+        # AdaDelta parameter update
+        # Update E[g^2]
+        
+        updates = [
+            (eg, rho * eg + (1 - rho) * T.pow(param_grad, 2))
+            for eg, param_grad, param_shape in zip(egs, param_grads, param_shapes)
+        ]
 
-    # updates = [
-    #     (eg, rho * eg + (1 - rho) * T.pow(param_grad, 2))
-    #     for eg, param_grad, param_shape in zip(egs, param_grads, param_shapes)
-    # ]
-    
-    # # More updates for the gradients
-    # param_updates = [
-    #     (param, param - (T.sqrt(ex + epsilon) / T.sqrt(eg + epsilon)) * param_grad)
-    #     for eg, ex, param, param_grad in zip(egs, exs, params, param_grads)
-    # ]
-    
-    # updates +=  param_updates
-    
-    # # Last, updates for E[x^2]
-    # updates += [
-    #     (ex, rho * ex + (1 - rho) * T.pow(param_update[1], 2))
-    #     for ex, param_update in zip(exs, param_updates)
-    # ]
+        # More updates for the gradients
+        param_updates = [
+            (param, param - (T.sqrt(ex + epsilon) / T.sqrt(eg + epsilon)) * param_grad)
+            for eg, ex, param, param_grad in zip(egs, exs, params, param_grads)
+        ]
 
-    updates = [
-        (param, param - 0.01 * param_grad)
-        for param, param_grad in zip(params, param_grads)
-    ]
-    
+        updates += param_updates
+
+        # # Last, updates for E[x^2]
+        updates += [
+            (ex, rho * ex + (1 - rho) * T.pow(param_update[1], 2))
+            for ex, param_update in zip(exs, param_updates)
+        ] 
+
+    else:
+        updates = [
+            (param, param - learning_rate * param_grad)
+            for param, param_grad in zip(params, param_grads)
+        ]
+
     train_model = theano.function(inputs = [batch_index],
-                                  outputs = cost, 
+                                  outputs = [cost], 
                                   updates = updates,
                                   givens = {
                                       x: train_set_x[batch_index * batch_size: (batch_index + 1) * batch_size],
                                       y: train_set_y[batch_index * batch_size: (batch_index + 1) * batch_size]
-                                  }
+                                  },
     )
+
         
-    
-    valid_model = theano.function(inputs = [],
+    train_error = theano.function(inputs = [],
+                                  outputs = model.errors(y), 
+                                  givens = {
+                                      x: train_set_x,
+                                      y: train_set_y
+                                  }, 
+    )
+
+    valid_error = theano.function(inputs = [],
                                   outputs = model.errors(y), 
                                   givens = {
                                       x: valid_set_x,
                                       y: valid_set_y
-                                  }
+                                  }, 
+                                  # mode = "DebugMode"
     )
+    
+    #############################
+    # Debugging purpose code    #
+    #############################
+    # : PARAMETER TUNING NOTE:
+    # some demonstration of the gradient vanishing probelm
+    grad_abs_avg = [theano.printing.Print(param.name)(
+        T.mean(T.abs_(param_grad))
+    )
+                    for param, param_grad in zip(params, param_grads)
+    ]
+    
+    if print_config["nnl"]:
+        print_nnl = theano.function(
+            inputs = [batch_index],
+            outputs = theano.printing.Print("nnl")(model.nnl(y)),
+            givens = {
+                x: train_set_x[batch_index * batch_size: (batch_index + 1) * batch_size],
+                y: train_set_y[batch_index * batch_size: (batch_index + 1) * batch_size]
+            }
+        )
+        
+    if print_config["L2_sqr"]:
+        print_L2_sqr = theano.function(
+            inputs = [],
+            outputs = theano.printing.Print("L2_sqr")(L2_sqr)
+        )
+        
+    if print_config["grad_abs_mean"]:
+        print_grads = theano.function(
+            inputs = [batch_index], 
+            outputs = grad_abs_avg, 
+            givens = {
+                x: train_set_x[batch_index * batch_size: (batch_index + 1) * batch_size],
+                y: train_set_y[batch_index * batch_size: (batch_index + 1) * batch_size]
+            }
+        )
+    if print_config["lr"]:
+        print_learning_rates = theano.function(
+            inputs = [],
+            outputs = [theano.printing.Print(ex.name)(
+                T.mean(T.sqrt(ex + epsilon) / T.sqrt(eg + epsilon))
+            ) 
+                       for eg, ex in zip(egs, exs)]
+        )
+
+    if print_config["embeddings"]:
+        print_embeddings = theano.function(
+            inputs = [],
+            outputs = theano.printing.Print("embeddings")(layer1.embeddings)
+        )
+    
+    if print_config["logreg_W"]:
+        print_logreg_W = theano.function(
+            inputs = [],
+            outputs = theano.printing.Print(model.W.name)(model.W)
+        )
+
+    if print_config["convlayer1_W"]:
+        print_convlayer1_W = theano.function(
+            inputs = [],
+            outputs = theano.printing.Print(layer2.W.name)(layer2.W)
+        )
+
+    if print_config["convlayer2_W"]:
+        print_convlayer2_W = theano.function(
+            inputs = [],
+            outputs = theano.printing.Print(layer3.W.name)(layer3.W)
+        )
+
+    if print_config["p_y_given_x"]:
+        print_p_y_given_x = theano.function(
+            inputs = [batch_index],
+            outputs = theano.printing.Print("p_y_given_x")(model.p_y_given_x),
+            givens = {
+                x: train_set_x[batch_index * batch_size: (batch_index + 1) * batch_size]
+            }
+        )
     
     #the training loop
     patience = 10000  # look as this many examples regardless
     patience_increase = 2  # wait this much longer when a new best is
                                   # found
     improvement_threshold = 0.995  # a relative improvement of this much is
-                                  # considered significant
-
+    # considered significant
+                                  
     validation_frequency = min(n_train_batches, patience / 2)
 
     best_validation_loss = np.inf
@@ -416,24 +527,44 @@ def train_and_test(
         print "At epoch {0}".format(epoch)
         
         for minibatch_index in xrange(n_train_batches):
+           
+            train_cost = train_model(minibatch_index)
 
-            train_error = train_model(minibatch_index)
-            
-            layer1.normalize() # normalize the word embedding
-            
+            if print_config["nnl"]:
+                print_nnl(minibatch_index)
 
+            if print_config["L2_sqr"]:
+                print_L2_sqr()
+
+            if print_config["p_y_given_x"]:
+                print_p_y_given_x(minibatch_index)
+
+            if print_config["convlayer2_W"]:
+                print_convlayer2_W()
+
+            if print_config["convlayer1_W"]:
+                print_convlayer1_W()
+
+            # print_grads(minibatch_index)
+            # print_learning_rates()
+            # print_embeddings()
+            # print_logreg_param()
+            
             # iteration number
             iter = (epoch - 1) * n_train_batches + minibatch_index
-            
-            # if (iter + 1) % validation_frequency == 0:
+
+            if (minibatch_index+1) % 50 == 0 or minibatch_index == n_train_batches - 1:
+                print "%d / %d minibatches completed" %(minibatch_index + 1, n_train_batches)                
                 
-            dev_error = valid_model()
-            print "At epoch %d and minibatch %d. Dev error %.2f%%" %(
-                epoch, 
-                minibatch_index,
-                dev_error * 100
-            )
-        
+
+            if (iter + 1) % validation_frequency == 0:
+                print "At epoch %d and minibatch %d. \nTrain error %.2f%%\nDev error %.2f%%\n" %(
+                    epoch, 
+                    minibatch_index,
+                    train_error() * 100, 
+                    valid_error() * 100
+                )
+    
     end_time = time.clock()
     print(('Optimization complete. Best validation score of %f %% '
            'obtained at iteration %i, with test performance %f %%') %
@@ -444,4 +575,20 @@ def train_and_test(
 
     
 if __name__ == "__main__":
-    train_and_test(learning_rate = 0.1)
+    print_config = {
+        "lr": False,
+        "logreg_W": False,
+        "logreg_b": False,
+        "convlayer2_W": True,
+        "convlayer1_W": True,
+        "grad_abs_mean": False,
+        "p_y_given_x": True,
+        "embeddings": False,
+        "nnl": True,
+        "L2_sqr": True,
+    }
+    
+    train_and_test(learning_rate = 0.01, 
+                   batch_size = 50, 
+                   print_config = print_config
+    )
