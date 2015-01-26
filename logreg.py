@@ -3,9 +3,12 @@ import theano.tensor as T
 import numpy as np
 
 class LogisticRegression(object):
-    def __init__(self, input, n_in, n_out):
+    def __init__(self, rng, input, n_in, n_out):
         """ Initialize the parameters of the logistic regression
 
+        :type: rng: 
+        :param: rng: the random number generator
+        
         :type input: theano.tensor.TensorType
         :param input: symbolic variable that describes the input of the
                       architecture (one minibatch)
@@ -19,16 +22,20 @@ class LogisticRegression(object):
                       which the labels lie
 
         """        
-        self.W = theano.shared(value = np.zeros((n_in, n_out), 
-                                                dtype = theano.config.floatX),
+        self.W = theano.shared(value = np.asarray(rng.normal(0, 0.05, (n_in, n_out)),
+                                                  dtype = theano.config.floatX
+                                              ), 
                                name = 'logreg_W',
-                               borrow = True)
+                               borrow = True
+                           )
+
         self.b = theano.shared(value = np.zeros((n_out, ), 
                                                 dtype = theano.config.floatX),
                                name = 'logreg_b',
                                borrow = True)
 
         # the probability of labels given the data
+        # :PARAMETER TUNING NOTE: using tanh screws things up
         self.p_y_given_x = T.nnet.softmax(T.dot(input, self.W) + self.b)
         
         # the predicted labels
@@ -186,5 +193,6 @@ def train_and_test(learning_rate, batch_size,
         
 
 if __name__ == "__main__":
-    train_and_test(0.01, 600)
+    train_and_test(0.1, 600)
+    
     
