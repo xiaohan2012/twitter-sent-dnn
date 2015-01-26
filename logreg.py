@@ -35,7 +35,6 @@ class LogisticRegression(object):
                                borrow = True)
 
         # the probability of labels given the data
-        # :PARAMETER TUNING NOTE: using tanh screws things up
         self.p_y_given_x = T.nnet.softmax(T.dot(input, self.W) + self.b)
         
         # the predicted labels

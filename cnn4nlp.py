@@ -224,12 +224,15 @@ class ConvFoldingPoolLayer(object):
         pool_out = (self.k_max_pool(fold_out, self.k) + 
                     self.b.dimshuffle('x', 0, 'x', 'x'))
 
+        
+        # return T.tanh(pool_out)
         # use recitifer
         return T.switch(pool_out > 0, pool_out, 0)
 
 def train_and_test(
-        use_aldadetla = True,
+        use_adadelta = True,
         learning_rate = 0.1,
+        delay_embedding_learning = True,
         epsilon = 0.000001,
         rho = 0.95,
         nkerns = [6, 12],
@@ -289,8 +292,14 @@ def train_and_test(
     layer2_k = int(max(k_top, 
                        math.ceil(.5 * train_sent_len)))
 
+    dpl = DropoutLayer(
+        input = layer1.output,
+        rng = rng, 
+        dropout_rate = 0.5
+    ) 
+    
     layer2 = ConvFoldingPoolLayer(rng, 
-                                  input = layer1.output, 
+                                  input = dpl.output, 
                                   filter_shape = filter_shape, 
                                   k = layer2_k)
     
@@ -300,8 +309,14 @@ def train_and_test(
                     1, 7 
     )
     
+    dpl = DropoutLayer(
+        input = layer2.output,
+        rng = rng, 
+        dropout_rate = 0.5
+    ) 
+    
     layer3 = ConvFoldingPoolLayer(rng, 
-                                  input = layer2.output,
+                                  input = dpl.output,
                                   filter_shape = filter_shape, 
                                   k = k_top)
     
@@ -328,9 +343,9 @@ def train_and_test(
     ############################
     
     L2_sqr = (
-        0.0001 * (layer1.embeddings ** 2).sum()
-        + 0.00003 * (layer2.W ** 2).sum()
-        + 0.000003 * (layer3.W ** 2).sum()
+        0.00001 * (layer1.embeddings ** 2).sum()
+        + 0.0003 * (layer2.W ** 2).sum()
+        + 0.0003 * (layer3.W ** 2).sum()
         + 0.0001 * (model.W ** 2).sum()
     )
     
@@ -340,9 +355,13 @@ def train_and_test(
     ############################
     cost = model.nnl(y) + L2_sqr
         
-    params = (layer1.params + layer2.params + layer3.params + model.params)
-    param_shapes=  (layer1.param_shapes + layer2.param_shapes + layer3.param_shapes + model.param_shapes)
-    
+    if not delay_embedding_learning:
+        params = (layer1.params + layer2.params + layer3.params + model.params)
+        param_shapes=  (layer1.param_shapes + layer2.param_shapes + layer3.param_shapes + model.param_shapes)
+    else:
+        params = (layer2.params + layer3.params + model.params)
+        param_shapes=  (layer2.param_shapes + layer3.param_shapes + model.param_shapes)
+
     # AdaDelta parameter symbols
     # E[g^2]
     # initialized to zero
@@ -372,7 +391,7 @@ def train_and_test(
     
     param_grads = [T.grad(cost, param) for param in params]
     
-    if use_aldadetla:
+    if use_adadelta:
         # AdaDelta parameter update
         # Update E[g^2]
         
@@ -381,18 +400,21 @@ def train_and_test(
             for eg, param_grad, param_shape in zip(egs, param_grads, param_shapes)
         ]
 
+        delta_x = [-(T.sqrt(ex + epsilon) / T.sqrt(eg + epsilon)) * param_grad
+                   for eg, ex, param_grad in zip(egs, exs, param_grads)
+        ]
         # More updates for the gradients
         param_updates = [
-            (param, param - (T.sqrt(ex + epsilon) / T.sqrt(eg + epsilon)) * param_grad)
-            for eg, ex, param, param_grad in zip(egs, exs, params, param_grads)
+            (param, param + dx)
+            for eg, ex, param, dx in zip(egs, exs, params, delta_x)
         ]
 
         updates += param_updates
 
         # # Last, updates for E[x^2]
         updates += [
-            (ex, rho * ex + (1 - rho) * T.pow(param_update[1], 2))
-            for ex, param_update in zip(exs, param_updates)
+            (ex, rho * ex + (1 - rho) * T.pow(dx, 2))
+            for ex, dx in zip(exs, delta_x)
         ] 
 
     else:
@@ -400,6 +422,8 @@ def train_and_test(
             (param, param - learning_rate * param_grad)
             for param, param_grad in zip(params, param_grads)
         ]
+
+    print updates
 
     train_model = theano.function(inputs = [batch_index],
                                   outputs = [cost], 
@@ -433,16 +457,11 @@ def train_and_test(
     #############################
     # : PARAMETER TUNING NOTE:
     # some demonstration of the gradient vanishing probelm
-    grad_abs_avg = [theano.printing.Print(param.name)(
-        T.mean(T.abs_(param_grad))
-    )
-                    for param, param_grad in zip(params, param_grads)
-    ]
     
     if print_config["nnl"]:
-        print_nnl = theano.function(
+        get_nnl = theano.function(
             inputs = [batch_index],
-            outputs = theano.printing.Print("nnl")(model.nnl(y)),
+            outputs = model.nnl(y),
             givens = {
                 x: train_set_x[batch_index * batch_size: (batch_index + 1) * batch_size],
                 y: train_set_y[batch_index * batch_size: (batch_index + 1) * batch_size]
@@ -450,15 +469,19 @@ def train_and_test(
         )
         
     if print_config["L2_sqr"]:
-        print_L2_sqr = theano.function(
+        get_L2_sqr = theano.function(
             inputs = [],
-            outputs = theano.printing.Print("L2_sqr")(L2_sqr)
+            outputs = L2_sqr
         )
         
     if print_config["grad_abs_mean"]:
         print_grads = theano.function(
             inputs = [batch_index], 
-            outputs = grad_abs_avg, 
+            outputs = [theano.printing.Print(param.name)(
+                T.mean(T.abs_(param_grad))
+            )
+                       for param, param_grad in zip(params, param_grads)
+                   ], 
             givens = {
                 x: train_set_x[batch_index * batch_size: (batch_index + 1) * batch_size],
                 y: train_set_y[batch_index * batch_size: (batch_index + 1) * batch_size]
@@ -522,19 +545,30 @@ def train_and_test(
     done_looping = False
     epoch = 0
     
+    nnls = []
+    L2_sqrs = []
+    
     while (epoch < n_epochs) and (not done_looping):
         epoch += 1
         print "At epoch {0}".format(epoch)
+        
+        train_set_x_data = train_set_x.get_value(borrow = True)
+        train_set_y_data = train_set_y.get_value(borrow = True)
+        
+        permutation = np.random.permutation(train_set_x.get_value(borrow=True).shape[0])
+
+        train_set_x.set_value(train_set_x_data[permutation])
+        train_set_y.set_value(train_set_y_data[permutation])
         
         for minibatch_index in xrange(n_train_batches):
            
             train_cost = train_model(minibatch_index)
 
             if print_config["nnl"]:
-                print_nnl(minibatch_index)
-
+                nnls.append(get_nnl(minibatch_index))
+                
             if print_config["L2_sqr"]:
-                print_L2_sqr()
+                L2_sqrs.append(get_L2_sqr())
 
             if print_config["p_y_given_x"]:
                 print_p_y_given_x(minibatch_index)
@@ -544,6 +578,9 @@ def train_and_test(
 
             if print_config["convlayer1_W"]:
                 print_convlayer1_W()
+                
+            if print_config["grad_abs_mean"]:
+                print_grads(minibatch_index)
 
             # print_grads(minibatch_index)
             # print_learning_rates()
@@ -555,6 +592,12 @@ def train_and_test(
 
             if (minibatch_index+1) % 50 == 0 or minibatch_index == n_train_batches - 1:
                 print "%d / %d minibatches completed" %(minibatch_index + 1, n_train_batches)                
+                if print_config["nnl"]:
+                    print "`nnl` for the past 50 minibatches is %f" %(np.mean(np.array(nnls)))
+                    nnls = []
+                if print_config["L2_sqr"]:
+                    print "`L2_sqr`` for the past 50 minibatches is %f" %(np.mean(np.array(L2_sqrs)))
+                    L2_sqrs = []
                 
 
             if (iter + 1) % validation_frequency == 0:
@@ -579,16 +622,19 @@ if __name__ == "__main__":
         "lr": False,
         "logreg_W": False,
         "logreg_b": False,
-        "convlayer2_W": True,
-        "convlayer1_W": True,
+        "convlayer2_W": False,
+        "convlayer1_W": False,
         "grad_abs_mean": False,
-        "p_y_given_x": True,
+        "p_y_given_x": False,
         "embeddings": False,
         "nnl": True,
         "L2_sqr": True,
     }
     
-    train_and_test(learning_rate = 0.01, 
-                   batch_size = 50, 
-                   print_config = print_config
+    train_and_test(
+        use_adadelta = False,
+        delay_embedding_learning = True,
+        learning_rate = 0.01, 
+        batch_size = 50, 
+        print_config = print_config
     )
