@@ -18,7 +18,8 @@ f = theano.function(inputs = [x],
                 outputs = l.output)
 
 print x_val
-print f(x_val)
+print f(x_val) 
+print f(x_val) # second time should be different
 
 
 
