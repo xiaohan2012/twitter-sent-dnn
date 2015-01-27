@@ -91,10 +91,9 @@ api = tweepy.API(auth)
 
 class MainHandler(tornado.web.RequestHandler):
     def get(self):
-        self.write("hello")   
-#        t = tornado.template.Template(html)
-#        self.write(t.generate(tweet_senti="0", hashtag_senti="0"))
-'''
+        t = tornado.template.Template(html)
+        self.write(t.generate(tweet_senti="0", hashtag_senti="0"))
+
     def post(self):
         tweet = self.get_argument("tweet", default="") 	    
         hashtag = self.get_argument("hashtag", default="")      
@@ -110,7 +109,6 @@ class MainHandler(tornado.web.RequestHandler):
             self.write(t.generate(tweet_senti="0", hashtag_senti=str(index)))
 	else:
             self.write(t.generate(tweet_senti="0", hashtag_senti="0"))
-'''
 
 def main():
     application = tornado.web.Application([(r"/", MainHandler)])
