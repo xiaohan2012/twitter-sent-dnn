@@ -78,27 +78,7 @@ class WordEmbeddingLayer(object):
         sent_embedding_tensor = T.stacklists(sent_embedding_list) # make it into a 3D tensor
         
         self.output = sent_embedding_tensor.dimshuffle(0, 'x', 2, 1) # make it a 4D tensor
-        
-class DropoutLayer(object):
-    """
-    As the name suggests
-
-    Refer to here: https://github.com/mdenil/dropout/blob/master/mlp.py
-    """
-
-    def __init__(self, input, rng, dropout_rate):
-
-        srng = theano.tensor.shared_randomstreams.RandomStreams(
-            rng.randint(999999))
-        
-        # p=1-p because 1's indicate keep and p is prob of dropping
-        mask = srng.binomial(n=1, 
-                             p=1-dropout_rate, 
-                             size=input.shape)
-
-        self.output = input * T.cast(mask, theano.config.floatX)
-        
-    
+                    
 class ConvFoldingPoolLayer(object):
     """
     Convolution, folding and k-max pooling layer
@@ -135,7 +115,7 @@ class ConvFoldingPoolLayer(object):
         self.filter_shape = filter_shape
 
         if W is not None:
-            W_val = W
+            self.W = W
         else:
             fan_in = np.prod(filter_shape[1:])
             
@@ -149,16 +129,18 @@ class ConvFoldingPoolLayer(object):
                 dtype=theano.config.floatX
             )
 
-        self.W = theano.shared(
-            value = np.asarray(W_val,
-                               dtype = theano.config.floatX),
-            name = "W",
-            borrow=True
-        )
+            self.W = theano.shared(
+                value = np.asarray(W_val,
+                                   dtype = theano.config.floatX),
+                name = "W",
+                borrow=True
+            )
         
         # make b
         if b is not None:
             b_val = b
+            b_size = b.shape
+            self.b = b
         else:
             b_size = (filter_shape[0], )
             b_val = np.zeros(
@@ -166,14 +148,14 @@ class ConvFoldingPoolLayer(object):
                 dtype = theano.config.floatX
             )
             
-        self.b = theano.shared(
-            value = np.asarray(
-                b_val,
-                dtype = theano.config.floatX
-            ),
-            name = "b",
-            borrow = True
-        )
+            self.b = theano.shared(
+                value = np.asarray(
+                    b_val,
+                    dtype = theano.config.floatX
+                ),
+                name = "b",
+                borrow = True
+            )
 
         self.params = [self.W, self.b]
         self.param_shapes = [filter_shape,
@@ -229,20 +211,47 @@ class ConvFoldingPoolLayer(object):
         # use recitifer
         return T.switch(pool_out > 0, pool_out, 0)
 
+class DropoutLayer(object):
+    """
+    As the name suggests
+
+    Refer to here: https://github.com/mdenil/dropout/blob/master/mlp.py
+    """
+
+    def __init__(self, input, rng, dropout_rate):
+
+        srng = theano.tensor.shared_randomstreams.RandomStreams(
+            rng.randint(999999))
+        
+        # p=1-p because 1's indicate keep and p is prob of dropping
+        mask = srng.binomial(n=1, 
+                             p=1-dropout_rate, 
+                             size=input.shape)
+
+        self.output = input * T.cast(mask, theano.config.floatX)
+
 def train_and_test(
         use_adadelta = True,
+        use_L2_reg = True,
         learning_rate = 0.1,
         delay_embedding_learning = True,
         epsilon = 0.000001,
         rho = 0.95,
-        nkerns = [6, 12],
         embed_dm = 48,
         k_top = 5,
-        L2_reg=0.00001,
+        L2_regs= [0.00001, 0.0003, 0.0003, 0.0001],
         n_hidden = 500,
         batch_size = 500,
         n_epochs = 2000, 
-        print_config = {}):
+        dropout_switches = [True, True, True], 
+        dropout_rates = [0.2, 0.5, 0.5],
+        conv_layer_n = 2,
+        nkerns = [6, 12],
+        conv_sizes = [10, 7],
+        print_config = {}
+):
+
+    assert conv_layer_n == len(conv_sizes) == len(nkerns) == (len(L2_regs) - 2)
 
     ###################
     # get the data    #
@@ -283,84 +292,116 @@ def train_and_test(
                                 vocab_size = len(word2index), 
                                 embed_dm = embed_dm)    
     
-    # Layer 2: convolution&fold&pool layer
-    filter_shape = (nkerns[0],
-                    1, 
-                    1, 10
-    )
+    dropout_layers = [layer1]
+    layers = [layer1]
     
-    layer2_k = int(max(k_top, 
-                       math.ceil(.5 * train_sent_len)))
+    for i in xrange(conv_layer_n):
+        
+        # for the dropout layer
+        dpl = DropoutLayer(
+            input = dropout_layers[-1].output,
+            rng = rng, 
+            dropout_rate = dropout_rates[0]
+        ) 
+        next_layer_dropout_input = dpl.output
+        next_layer_input = layers[-1].output
+        
+        # for the conv layer
+        filter_shape = (
+            nkerns[i],
+            (1 if i == 0 else nkerns[i-1]), 
+            1, 
+            conv_sizes[i]
+        )
+        
+        k = int(max(k_top, 
+                    math.ceil((conv_layer_n - float(i+1)) / conv_layer_n * train_sent_len)))
+        
+        print "For conv layer %d, filter shape = %r, k = %d, dropout_rate = %f" %(i+2, filter_shape, k, dropout_rates[i])
+        
+        # we have two layers adding to two paths repsectively, 
+        # one for training
+        # the other for prediction(averaged model)
 
-    dpl = DropoutLayer(
-        input = layer1.output,
-        rng = rng, 
-        dropout_rate = 0.5
-    ) 
+        dropout_conv_layer = ConvFoldingPoolLayer(rng, 
+                                                  input = next_layer_dropout_input,
+                                                  filter_shape = filter_shape, 
+                                                  k = k)
     
-    layer2 = ConvFoldingPoolLayer(rng, 
-                                  input = dpl.output, 
-                                  filter_shape = filter_shape, 
-                                  k = layer2_k)
+        # for prediction
+        # sharing weight with dropout layer
+        conv_layer = ConvFoldingPoolLayer(rng, 
+                                          input = next_layer_input,
+                                          filter_shape = filter_shape,
+                                          k = k,
+                                          W = dropout_conv_layer.W * (1 - dropout_rates[i]), # model averaging
+                                          b = dropout_conv_layer.b
+        )
+
+        dropout_layers.append(dropout_conv_layer)
+        layers.append(conv_layer)
     
-    # Layer 3: convolution&fold&pool layer
-    filter_shape = (nkerns[1], 
-                    nkerns[0],
-                    1, 7 
-    )
+    # last, the output layer
+    # both dropout and without dropout
+    n_in = nkerns[-1] * k_top * embed_dm / (len(nkerns)*2)
+    print "For output layer, n_in = %d, dropout_rate = %f" %(n_in, dropout_rates[-1])
     
-    dpl = DropoutLayer(
-        input = layer2.output,
-        rng = rng, 
-        dropout_rate = 0.5
-    ) 
-    
-    layer3 = ConvFoldingPoolLayer(rng, 
-                                  input = dpl.output,
-                                  filter_shape = filter_shape, 
-                                  k = k_top)
-    
-    # Hiddne layer: dropout layer
-    layer4 = DropoutLayer(
-        input = layer3.output,
-        rng = rng, 
-        dropout_rate = 0.5
-    )
-    
-    layer4_input = layer4.output.flatten(2) #make it into a row 
-    
-    
-    # Softmax Layer
-    model = LogisticRegression(
+    dropout_output_layer = LogisticRegression(
         rng,
-        input = layer4_input, 
-        n_in = nkerns[1] * k_top * embed_dm / 4, # we fold twice, so divide by 4
+        input = dropout_layers[-1].output.flatten(2), 
+        n_in = n_in, # divided by 2x(how many times are folded)
         n_out = len(possible_labels) # five sentiment level
     )
 
+    output_layer = LogisticRegression(
+        rng,
+        input = layers[-1].output.flatten(2), 
+        n_in = n_in,
+        n_out = len(possible_labels),
+        W = dropout_output_layer.W * (1 - dropout_rates[-1]), # sharing the parameters, don't forget
+        b = dropout_output_layer.b
+    )
+    
+    dropout_layers.append(dropout_output_layer)
+    layers.append(output_layer)
+
+    ###############################
+    # Parameters to be used       #
+    ##############################
+    if not delay_embedding_learning:
+        print "Immediate embedding learning. "
+        param_layers = dropout_layers
+    else:
+        print "Delay embedding learning."
+        param_layers = dropout_layers[1:] # exclude the embedding layer
+    print "param_layers: %r" %param_layers
+        
+    params = [param for layer in param_layers for param in layer.params]
+    param_shapes=  [param for layer in param_layers for param in layer.param_shapes]
+
+
+    # cost and error come from different model!
+    dropout_cost = dropout_output_layer.nnl(y)
+    errors = output_layer.errors(y)
+    
     ############################
     # L2 regularizer           #
     ############################
     
-    L2_sqr = (
-        0.00001 * (layer1.embeddings ** 2).sum()
-        + 0.0003 * (layer2.W ** 2).sum()
-        + 0.0003 * (layer3.W ** 2).sum()
-        + 0.0001 * (model.W ** 2).sum()
-    )
+    L2_sqr = T.sum([
+        L2_reg * ((layer.W if hasattr(layer, "W") else layer.embeddings) ** 2).sum()
+        for L2_reg, layer in zip(L2_regs, param_layers)
+    ])
     
     ############################
     # Training function and    #
     # AdaDelta learning rate   #
     ############################
-    cost = model.nnl(y) + L2_sqr
-        
-    if not delay_embedding_learning:
-        params = (layer1.params + layer2.params + layer3.params + model.params)
-        param_shapes=  (layer1.param_shapes + layer2.param_shapes + layer3.param_shapes + model.param_shapes)
+    if use_L2_reg:
+        cost = dropout_cost + L2_sqr
     else:
-        params = (layer2.params + layer3.params + model.params)
-        param_shapes=  (layer2.param_shapes + layer3.param_shapes + model.param_shapes)
+        cost = dropout_cost
+        
 
     # AdaDelta parameter symbols
     # E[g^2]
@@ -375,7 +416,7 @@ def train_and_test(
         )
         for param_shape, param in zip(param_shapes, params)
     ]
-    
+
     # E[\delta x^2]
     # initialized to zero
     exs = [
@@ -393,38 +434,37 @@ def train_and_test(
     
     if use_adadelta:
         # AdaDelta parameter update
-        # Update E[g^2]
+        print "Using AdaDelta with rho = %f and epsilon = %f" %(rho, epsilon)
         
-        updates = [
-            (eg, rho * eg + (1 - rho) * T.pow(param_grad, 2))
-            for eg, param_grad, param_shape in zip(egs, param_grads, param_shapes)
+        new_egs = [
+            rho * eg + (1 - rho) * g ** 2
+            for eg, g in zip(egs, param_grads)
         ]
-
-        delta_x = [-(T.sqrt(ex + epsilon) / T.sqrt(eg + epsilon)) * param_grad
-                   for eg, ex, param_grad in zip(egs, exs, param_grads)
+        delta_x = [
+            -(T.sqrt(ex + epsilon) / T.sqrt(new_eg + epsilon)) * g
+            for new_eg, ex, g in zip(new_egs, exs, param_grads)
         ]
-        # More updates for the gradients
-        param_updates = [
-            (param, param + dx)
-            for eg, ex, param, dx in zip(egs, exs, params, delta_x)
-        ]
-
-        updates += param_updates
-
-        # # Last, updates for E[x^2]
-        updates += [
-            (ex, rho * ex + (1 - rho) * T.pow(dx, 2))
+        new_exs = [
+            rho * ex + (1 - rho) * (dx ** 2)
             for ex, dx in zip(exs, delta_x)
-        ] 
+        ]
+
+        egs_updates = zip(egs, new_egs)
+        exs_updates = zip(exs, new_exs)
+        param_updates = [
+            (p, p + dx*g)
+            for dx, g, p in zip(delta_x, param_grads, params)
+        ]
+        
+        updates = egs_updates + exs_updates + param_updates
 
     else:
+        print "Using const learning rate: %f" %(learning_rate)
         updates = [
             (param, param - learning_rate * param_grad)
             for param, param_grad in zip(params, param_grads)
         ]
-
-    print updates
-
+        
     train_model = theano.function(inputs = [batch_index],
                                   outputs = [cost], 
                                   updates = updates,
@@ -436,7 +476,7 @@ def train_and_test(
 
         
     train_error = theano.function(inputs = [],
-                                  outputs = model.errors(y), 
+                                  outputs = errors, 
                                   givens = {
                                       x: train_set_x,
                                       y: train_set_y
@@ -444,7 +484,7 @@ def train_and_test(
     )
 
     valid_error = theano.function(inputs = [],
-                                  outputs = model.errors(y), 
+                                  outputs = errors, 
                                   givens = {
                                       x: valid_set_x,
                                       y: valid_set_y
@@ -461,7 +501,7 @@ def train_and_test(
     if print_config["nnl"]:
         get_nnl = theano.function(
             inputs = [batch_index],
-            outputs = model.nnl(y),
+            outputs = dropout_cost,
             givens = {
                 x: train_set_x[batch_index * batch_size: (batch_index + 1) * batch_size],
                 y: train_set_y[batch_index * batch_size: (batch_index + 1) * batch_size]
@@ -487,43 +527,45 @@ def train_and_test(
                 y: train_set_y[batch_index * batch_size: (batch_index + 1) * batch_size]
             }
         )
-    if print_config["lr"]:
-        print_learning_rates = theano.function(
+    if print_config["adadelta_lr_mean"]:
+        print_adadelta_lr_mean = theano.function(
             inputs = [],
-            outputs = [theano.printing.Print(ex.name)(
-                T.mean(T.sqrt(ex + epsilon) / T.sqrt(eg + epsilon))
-            ) 
-                       for eg, ex in zip(egs, exs)]
+            outputs = [
+                theano.printing.Print("adadelta mean:" +eg.name)(
+                    T.mean(T.sqrt(ex + epsilon) / T.sqrt(eg + epsilon))
+                )
+                for eg, ex in zip(egs, exs)
+            ]
         )
 
     if print_config["embeddings"]:
         print_embeddings = theano.function(
             inputs = [],
-            outputs = theano.printing.Print("embeddings")(layer1.embeddings)
+            outputs = theano.printing.Print("embeddings")(layers[0].embeddings)
         )
     
     if print_config["logreg_W"]:
         print_logreg_W = theano.function(
             inputs = [],
-            outputs = theano.printing.Print(model.W.name)(model.W)
+            outputs = theano.printing.Print(layers[-1].W.name)(layers[-1].W)
         )
 
     if print_config["convlayer1_W"]:
         print_convlayer1_W = theano.function(
             inputs = [],
-            outputs = theano.printing.Print(layer2.W.name)(layer2.W)
+            outputs = theano.printing.Print(layers[1].W.name)(layers[2].W)
         )
 
     if print_config["convlayer2_W"]:
         print_convlayer2_W = theano.function(
             inputs = [],
-            outputs = theano.printing.Print(layer3.W.name)(layer3.W)
+            outputs = theano.printing.Print(layers[2].W.name)(layers[2].W)
         )
 
     if print_config["p_y_given_x"]:
         print_p_y_given_x = theano.function(
             inputs = [batch_index],
-            outputs = theano.printing.Print("p_y_given_x")(model.p_y_given_x),
+            outputs = theano.printing.Print("p_y_given_x")(layers[-1].p_y_given_x),
             givens = {
                 x: train_set_x[batch_index * batch_size: (batch_index + 1) * batch_size]
             }
@@ -551,9 +593,10 @@ def train_and_test(
     while (epoch < n_epochs) and (not done_looping):
         epoch += 1
         print "At epoch {0}".format(epoch)
-        
+
+        # shuffle the training data        
         train_set_x_data = train_set_x.get_value(borrow = True)
-        train_set_y_data = train_set_y.get_value(borrow = True)
+        train_set_y_data = train_set_y.get_value(borrow = True)        
         
         permutation = np.random.permutation(train_set_x.get_value(borrow=True).shape[0])
 
@@ -581,6 +624,9 @@ def train_and_test(
                 
             if print_config["grad_abs_mean"]:
                 print_grads(minibatch_index)
+
+            if print_config["adadelta_lr_mean"]:
+                print_adadelta_lr_mean(minibatch_index)
 
             # print_grads(minibatch_index)
             # print_learning_rates()
@@ -619,22 +665,26 @@ def train_and_test(
     
 if __name__ == "__main__":
     print_config = {
-        "lr": False,
-        "logreg_W": False,
-        "logreg_b": False,
-        "convlayer2_W": False,
-        "convlayer1_W": False,
-        "grad_abs_mean": False,
-        "p_y_given_x": False,
-        "embeddings": False,
-        "nnl": True,
-        "L2_sqr": True,
+        "adadelta_lr_mean": 0,
+        "logreg_W": 0,
+        "logreg_b": 0,
+        "convlayer2_W": 0,
+        "convlayer1_W": 0,
+        "grad_abs_mean": 0,
+        "p_y_given_x": 0,
+        "embeddings": 0,
+        "nnl": 1,
+        "L2_sqr": 1,
     }
     
     train_and_test(
-        use_adadelta = False,
+        use_adadelta = True,
+        use_L2_reg = True, 
+        L2_regs= [0.00001, 0.03, 0.03, 0.01],
         delay_embedding_learning = True,
         learning_rate = 0.01, 
-        batch_size = 50, 
-        print_config = print_config
+        batch_size = 10, 
+        print_config = print_config, 
+        dropout_switches = [False, False, False], 
+        dropout_rates = [0.2, 0.5, 0.5]
     )
