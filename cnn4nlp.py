@@ -37,10 +37,9 @@ class WordEmbeddingLayer(object):
         # embed_val = np.concatenate((embed_val_except_pad, pad_val), 
         #                            axis = 0)
         
-        embedding_val = rng.uniform(
-            low = -1,
-            high = 1,
-            size = (vocab_size, embed_dm)
+        embedding_val = np.asarray(
+            rng.normal(0, 0.05, (vocab_size, embed_dm)), 
+            dtype = theano.config.floatX
         )
         
         embedding_val[vocab_size-1,:] = 0 # the <PAD> character is intialized to 0
@@ -57,17 +56,6 @@ class WordEmbeddingLayer(object):
         
         self.param_shapes = [(vocab_size, embed_dm)]
         
-        # updated_embeddings = self.embeddings[:-1] # all rows are updated except for the last row
-        
-        # self.normalize = theano.function(inputs = [],
-        #                                  updates = { self.embeddings:
-        #                                              (self.embeddings/ 
-        #                                               T.sqrt((self.embeddings**2).sum(axis=1)).dimshuffle(0,'x'))
-        #                                          }
-        # )
-
-        # self.normalize() #initial normalization
-
         # Return:
         
         # :type, theano.tensor.tensor4
@@ -88,6 +76,8 @@ class ConvFoldingPoolLayer(object):
                  input,
                  filter_shape,
                  k,
+                 activation,
+                 fan_in_fan_out = True,
                  W = None,
                  b = None):
         """
@@ -101,6 +91,13 @@ class ConvFoldingPoolLayer(object):
         k: int or theano.tensor.iscalar,
            the k value in the max-pooling layer
 
+        activation: str
+           the activation unit type, `tanh` or `relu`
+
+        fan_in_fan_out: bool
+           whether use fan-in fan-out initialization or not. Default, True
+           If not True, use `normal(0, 0.05, size)`
+
         W: theano.tensor.tensor4,
            the filter weight matrices, 
            dimension: (number of filters, num input feature maps, filter height, filter width)
@@ -110,24 +107,36 @@ class ConvFoldingPoolLayer(object):
            dimension: (filter number, )
                 
         """
+        
         self.input = input
         self.k = k
         self.filter_shape = filter_shape
 
+        assert activation in ('tanh', 'relu')
+        self.activation = activation
+        
         if W is not None:
             self.W = W
         else:
-            fan_in = np.prod(filter_shape[1:])
-            
-            fan_out = (filter_shape[0] * np.prod(filter_shape[2:]) / 
-                       k) # it's 
-            
-            W_bound = np.sqrt(6. / (fan_in + fan_out))
-
-            W_val = np.asarray(
-                rng.uniform(low=-W_bound, high=W_bound, size=filter_shape),
-                dtype=theano.config.floatX
-            )
+            if fan_in_fan_out:
+                # use fan-in fan-out init
+                fan_in = np.prod(filter_shape[1:])
+                
+                fan_out = (filter_shape[0] * np.prod(filter_shape[2:]) / 
+                           k) # it's 
+                
+                W_bound = np.sqrt(6. / (fan_in + fan_out))
+                
+                W_val = np.asarray(
+                    rng.uniform(low=-W_bound, high=W_bound, size=filter_shape),
+                    dtype=theano.config.floatX
+                )
+            else:
+                # normal initialization
+                W_val = np.asarray(
+                    rng.normal(0, 0.05, size = filter_shape),
+                    dtype=theano.config.floatX
+                )
 
             self.W = theano.shared(
                 value = np.asarray(W_val,
@@ -143,10 +152,7 @@ class ConvFoldingPoolLayer(object):
             self.b = b
         else:
             b_size = (filter_shape[0], )
-            b_val = np.zeros(
-                b_size, 
-                dtype = theano.config.floatX
-            )
+            b_val = np.zeros(b_size)
             
             self.b = theano.shared(
                 value = np.asarray(
@@ -207,9 +213,10 @@ class ConvFoldingPoolLayer(object):
                     self.b.dimshuffle('x', 0, 'x', 'x'))
 
         
-        # return T.tanh(pool_out)
-        # use recitifer
-        return T.switch(pool_out > 0, pool_out, 0)
+        if self.activation == "tanh":
+            return T.tanh(pool_out)
+        else:
+            return T.switch(pool_out > 0, pool_out, 0)
 
 class DropoutLayer(object):
     """
@@ -231,13 +238,16 @@ class DropoutLayer(object):
         self.output = input * T.cast(mask, theano.config.floatX)
 
 def train_and_test(
-        use_adadelta = True,
+        lr_update_method = "adadelta",
         use_L2_reg = True,
         learning_rate = 0.1,
+        fan_in_fan_out = True,
         delay_embedding_learning = True,
+        conv_activation_unit = "tanh", 
         epsilon = 0.000001,
         rho = 0.95,
-        embed_dm = 48,
+        gamma = 0.1,
+        embed_dm = 48,        
         k_top = 5,
         L2_regs= [0.00001, 0.0003, 0.0003, 0.0001],
         n_hidden = 500,
@@ -250,6 +260,8 @@ def train_and_test(
         conv_sizes = [10, 7],
         print_config = {}
 ):
+    if lr_update_method:
+        assert lr_update_method in ("adadelta", "adagrad")
 
     assert conv_layer_n == len(conv_sizes) == len(nkerns) == (len(L2_regs) - 2)
 
@@ -317,7 +329,14 @@ def train_and_test(
         k = int(max(k_top, 
                     math.ceil((conv_layer_n - float(i+1)) / conv_layer_n * train_sent_len)))
         
-        print "For conv layer %d, filter shape = %r, k = %d, dropout_rate = %f" %(i+2, filter_shape, k, dropout_rates[i])
+        print "For conv layer(%s) %d, filter shape = %r, k = %d, dropout_rate = %f and fan_in_fan_out: %r" %(
+            conv_activation_unit, 
+            i+2, 
+            filter_shape, 
+            k, 
+            dropout_rates[i], 
+            fan_in_fan_out
+        )
         
         # we have two layers adding to two paths repsectively, 
         # one for training
@@ -326,7 +345,9 @@ def train_and_test(
         dropout_conv_layer = ConvFoldingPoolLayer(rng, 
                                                   input = next_layer_dropout_input,
                                                   filter_shape = filter_shape, 
-                                                  k = k)
+                                                  k = k, 
+                                                  fan_in_fan_out = fan_in_fan_out,
+                                                  activation = conv_activation_unit)
     
         # for prediction
         # sharing weight with dropout layer
@@ -334,6 +355,7 @@ def train_and_test(
                                           input = next_layer_input,
                                           filter_shape = filter_shape,
                                           k = k,
+                                          activation = conv_activation_unit,
                                           W = dropout_conv_layer.W * (1 - dropout_rates[i]), # model averaging
                                           b = dropout_conv_layer.b
         )
@@ -389,7 +411,7 @@ def train_and_test(
     ############################
     
     L2_sqr = T.sum([
-        L2_reg * ((layer.W if hasattr(layer, "W") else layer.embeddings) ** 2).sum()
+        L2_reg / 2 * ((layer.W if hasattr(layer, "W") else layer.embeddings) ** 2).sum()
         for L2_reg, layer in zip(L2_regs, param_layers)
     ])
     
@@ -403,43 +425,43 @@ def train_and_test(
         cost = dropout_cost
         
 
-    # AdaDelta parameter symbols
-    # E[g^2]
-    # initialized to zero
-    egs = [
-        theano.shared(
-            value = np.zeros(param_shape,
-                             dtype = theano.config.floatX
-                         ),
-            borrow = True,        
-            name = "Eg:" + param.name
-        )
-        for param_shape, param in zip(param_shapes, params)
-    ]
-
-    # E[\delta x^2]
-    # initialized to zero
-    exs = [
-        theano.shared(
-            value = np.zeros(param_shape,
-                             dtype = theano.config.floatX
-                         ),
-            borrow = True,        
-            name = "Ex:" + param.name
-        )
-        for param_shape, param in zip(param_shapes, params)
-    ]
-    
     param_grads = [T.grad(cost, param) for param in params]
     
-    if use_adadelta:
+    if lr_update_method == "adadelta":
         # AdaDelta parameter update
+        # E[g^2]
+        # initialized to zero
+        egs = [
+            theano.shared(
+                value = np.zeros(param_shape,
+                                 dtype = theano.config.floatX
+                             ),
+                borrow = True,        
+                name = "Eg:" + param.name
+            )
+            for param_shape, param in zip(param_shapes, params)
+        ]
+
+        # E[\delta x^2]
+        # initialized to zero
+        exs = [
+            theano.shared(
+                value = np.zeros(param_shape,
+                                 dtype = theano.config.floatX
+                             ),
+                borrow = True,        
+                name = "Ex:" + param.name
+            )
+            for param_shape, param in zip(param_shapes, params)
+        ]
+    
         print "Using AdaDelta with rho = %f and epsilon = %f" %(rho, epsilon)
         
         new_egs = [
             rho * eg + (1 - rho) * g ** 2
             for eg, g in zip(egs, param_grads)
         ]
+        
         delta_x = [
             -(T.sqrt(ex + epsilon) / T.sqrt(new_eg + epsilon)) * g
             for new_eg, ex, g in zip(new_egs, exs, param_grads)
@@ -457,7 +479,43 @@ def train_and_test(
         ]
         
         updates = egs_updates + exs_updates + param_updates
+    elif lr_update_method == "adagrad":
+        print "Using AdaGrad with gamma = %f" %(gamma)
+        grad_hists = [
+            theano.shared(
+                value = np.zeros(param_shape,
+                                 dtype = theano.config.floatX
+                             ),
+                borrow = True,        
+                name = "grad_hist:" + param.name
+            )
+            for param_shape, param in zip(param_shapes, params)
+        ]
+        
+        new_grad_hists = [
+            g_hist + g ** 2
+            for g_hist, g in zip(grad_hists, param_grads)
+        ]
+        
+        sqs = [
+            T.sqrt(g_hist)
+            for g_hist in new_grad_hists
+        ]
+                
+        
+        sqs = [
+            T.set_subtensor(sq[sq != 0], gamma / sq[sq != 0])  #same as, sq[sq != 0] = gamma / sq[sq != 0]
+            for sq in sqs
+        ]
 
+        param_updates = [
+            (param, param - sq * param_grad)
+            for sq, param, param_grad in zip(sqs, params, param_grads)
+        ]
+
+        grad_hist_update = zip(grad_hists, new_grad_hists)
+
+        updates = grad_hist_update + param_updates
     else:
         print "Using const learning rate: %f" %(learning_rate)
         updates = [
@@ -516,15 +574,15 @@ def train_and_test(
         
     if print_config["grad_abs_mean"]:
         print_grads = theano.function(
-            inputs = [batch_index], 
+            inputs = [], 
             outputs = [theano.printing.Print(param.name)(
                 T.mean(T.abs_(param_grad))
             )
                        for param, param_grad in zip(params, param_grads)
                    ], 
             givens = {
-                x: train_set_x[batch_index * batch_size: (batch_index + 1) * batch_size],
-                y: train_set_y[batch_index * batch_size: (batch_index + 1) * batch_size]
+                x: train_set_x,
+                y: train_set_y
             }
         )
     if print_config["adadelta_lr_mean"]:
@@ -538,6 +596,17 @@ def train_and_test(
             ]
         )
 
+    if print_config["adagrad_lr_mean"]:
+        print_adagrad_lr_mean = theano.function(
+            inputs = [],
+            outputs = [
+                theano.printing.Print("adagrad mean")(
+                    T.mean(sq)
+                )
+                for sq in sqs
+            ]
+        )
+        
     if print_config["embeddings"]:
         print_embeddings = theano.function(
             inputs = [],
@@ -549,14 +618,20 @@ def train_and_test(
             inputs = [],
             outputs = theano.printing.Print(layers[-1].W.name)(layers[-1].W)
         )
-
-    if print_config["convlayer1_W"]:
-        print_convlayer1_W = theano.function(
+        
+    if print_config["logreg_b"]:
+        print_logreg_b = theano.function(
             inputs = [],
-            outputs = theano.printing.Print(layers[1].W.name)(layers[2].W)
+            outputs = theano.printing.Print(layers[-1].b.name)(layers[-1].b)
         )
 
-    if print_config["convlayer2_W"]:
+    if print_config["conv_layer1_W"]:
+        print_convlayer1_W = theano.function(
+            inputs = [],
+            outputs = theano.printing.Print(layers[1].W.name)(layers[1].W)
+        )
+
+    if print_config["conv_layer2_W"]:
         print_convlayer2_W = theano.function(
             inputs = [],
             outputs = theano.printing.Print(layers[2].W.name)(layers[2].W)
@@ -564,13 +639,21 @@ def train_and_test(
 
     if print_config["p_y_given_x"]:
         print_p_y_given_x = theano.function(
-            inputs = [batch_index],
+            inputs = [],
             outputs = theano.printing.Print("p_y_given_x")(layers[-1].p_y_given_x),
             givens = {
-                x: train_set_x[batch_index * batch_size: (batch_index + 1) * batch_size]
+                x: train_set_x
             }
         )
     
+    param_n = sum([1. for l in param_layers for p in l.params])
+    if print_config["print_param_weight_mean"]:
+        get_param_weight_mean = theano.function(
+            inputs = [], 
+            outputs = T.sum([T.sum(T.abs_(p)) 
+                             for l in param_layers for p in l.params]) / param_n
+        )
+
     #the training loop
     patience = 10000  # look as this many examples regardless
     patience_increase = 2  # wait this much longer when a new best is
@@ -611,23 +694,8 @@ def train_and_test(
                 nnls.append(get_nnl(minibatch_index))
                 
             if print_config["L2_sqr"]:
-                L2_sqrs.append(get_L2_sqr())
-
-            if print_config["p_y_given_x"]:
-                print_p_y_given_x(minibatch_index)
-
-            if print_config["convlayer2_W"]:
-                print_convlayer2_W()
-
-            if print_config["convlayer1_W"]:
-                print_convlayer1_W()
+                L2_sqrs.append(get_L2_sqr())            
                 
-            if print_config["grad_abs_mean"]:
-                print_grads(minibatch_index)
-
-            if print_config["adadelta_lr_mean"]:
-                print_adadelta_lr_mean(minibatch_index)
-
             # print_grads(minibatch_index)
             # print_learning_rates()
             # print_embeddings()
@@ -638,15 +706,41 @@ def train_and_test(
 
             if (minibatch_index+1) % 50 == 0 or minibatch_index == n_train_batches - 1:
                 print "%d / %d minibatches completed" %(minibatch_index + 1, n_train_batches)                
+
+            if (iter + 1) % validation_frequency == 0:
                 if print_config["nnl"]:
                     print "`nnl` for the past 50 minibatches is %f" %(np.mean(np.array(nnls)))
                     nnls = []
                 if print_config["L2_sqr"]:
                     print "`L2_sqr`` for the past 50 minibatches is %f" %(np.mean(np.array(L2_sqrs)))
                     L2_sqrs = []
-                
+                if print_config["print_param_weight_mean"]:
+                    print "weight mean %f: " %(get_param_weight_mean())
 
-            if (iter + 1) % validation_frequency == 0:
+                if print_config["conv_layer2_W"]:
+                    print_convlayer2_W()
+
+                if print_config["conv_layer1_W"]:
+                    print_convlayer1_W()
+
+                if print_config["p_y_given_x"]:
+                    print_p_y_given_x()
+
+                if print_config["adadelta_lr_mean"]:
+                    print_adadelta_lr_mean()
+
+                if print_config["adagrad_lr_mean"]:
+                    print_adagrad_lr_mean()
+
+                if print_config["grad_abs_mean"]:
+                    print_grads()
+                
+                if print_config["logreg_W"]:
+                    print_logreg_W()
+
+                if print_config["logreg_b"]:
+                    print_logreg_b()
+
                 print "At epoch %d and minibatch %d. \nTrain error %.2f%%\nDev error %.2f%%\n" %(
                     epoch, 
                     minibatch_index,
@@ -666,23 +760,27 @@ def train_and_test(
 if __name__ == "__main__":
     print_config = {
         "adadelta_lr_mean": 0,
+        "adagrad_lr_mean": 0,
         "logreg_W": 0,
         "logreg_b": 0,
-        "convlayer2_W": 0,
-        "convlayer1_W": 0,
+        "conv_layer2_W": 0,
+        "conv_layer1_W": 0,
         "grad_abs_mean": 0,
-        "p_y_given_x": 0,
+        "p_y_given_x": 1,
         "embeddings": 0,
         "nnl": 1,
         "L2_sqr": 1,
+        "print_param_weight_mean": 0,
     }
     
     train_and_test(
-        use_adadelta = True,
+        lr_update_method = "adagrad",
         use_L2_reg = True, 
-        L2_regs= [0.00001, 0.03, 0.03, 0.01],
+        L2_regs= [0.00001, 0.0003, 0.0003, 0.0001],
+        fan_in_fan_out = False,
         delay_embedding_learning = True,
-        learning_rate = 0.01, 
+        conv_activation_unit = "relu", 
+        learning_rate = 0.0001, 
         batch_size = 10, 
         print_config = print_config, 
         dropout_switches = [False, False, False], 

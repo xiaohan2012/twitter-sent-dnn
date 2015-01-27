@@ -38,8 +38,11 @@ class LogisticRegression(object):
         if b:
             self.b = b
         else:
-            self.b = theano.shared(value = np.zeros((n_out, ), 
-                                                    dtype = theano.config.floatX),
+
+            self.b = theano.shared(value = np.asarray(
+                np.zeros((n_out, )),
+                dtype = theano.config.floatX
+            ),
                                    name = 'logreg_b',
                                    borrow = True)
 
@@ -201,6 +204,4 @@ def train_and_test(learning_rate, batch_size,
         
 
 if __name__ == "__main__":
-    train_and_test(0.1, 600)
-    
-    
+    train_and_test(0.1, 600)            
