@@ -92,8 +92,9 @@ api = tweepy.API(auth)
 
 class MainHandler(tornado.web.RequestHandler):
     def get(self):
-        t = tornado.template.Template(html)
-        self.write(t.generate(tweet_senti="0", hashtag_senti="0"))
+        self.write("hello")   
+#        t = tornado.template.Template(html)
+#        self.write(t.generate(tweet_senti="0", hashtag_senti="0"))
 
     def post(self):
         tweet = self.get_argument("tweet", default="") 	    
@@ -113,7 +114,7 @@ class MainHandler(tornado.web.RequestHandler):
 
 
 def main():
-    application = tornado.web.Application([(r"/", MainHandler)], autoreload=True)
+    application = tornado.web.Application([(r"/", MainHandler)])
     http_server = tornado.httpserver.HTTPServer(application)
     port = int(os.environ.get("PORT", 5000))
     http_server.listen(port)
