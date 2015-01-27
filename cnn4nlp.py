@@ -37,8 +37,12 @@ class WordEmbeddingLayer(object):
         # embed_val = np.concatenate((embed_val_except_pad, pad_val), 
         #                            axis = 0)
         
+        # embedding_val = np.asarray(
+        #     rng.normal(0, 0.05, (vocab_size, embed_dm)), 
+        #     dtype = theano.config.floatX
+        # )
         embedding_val = np.asarray(
-            rng.normal(0, 0.05, (vocab_size, embed_dm)), 
+            rng.uniform(low = -0.5, high = 0.5, size = (vocab_size, embed_dm)), 
             dtype = theano.config.floatX
         )
         
@@ -203,17 +207,21 @@ class ConvFoldingPoolLayer(object):
         # non-linear transform of the convolution output
         conv_out = T.nnet.conv.conv2d(self.input, 
                                       self.W, 
-                                      border_mode = "full") 
-        
+                                      border_mode = "full")             
+
         # fold
         fold_out = self.fold(conv_out)
-                
+
         # k-max pool        
         pool_out = (self.k_max_pool(fold_out, self.k) + 
                     self.b.dimshuffle('x', 0, 'x', 'x'))
-
+        
+        # pool_out = theano.printing.Print("pool_out")(pool_out)
+        # around 0.
+        # why tanh becomes extreme?
         
         if self.activation == "tanh":
+            # return theano.printing.Print("tanh(pool_out)")(T.tanh(pool_out))
             return T.tanh(pool_out)
         else:
             return T.switch(pool_out > 0, pool_out, 0)
@@ -625,35 +633,70 @@ def train_and_test(
             outputs = theano.printing.Print(layers[-1].b.name)(layers[-1].b)
         )
 
+    train_data_at_index = {
+        x: train_set_x[batch_index * batch_size: (batch_index + 1) * batch_size],
+        # y: train_set_y[batch_index * batch_size: (batch_index + 1) * batch_size]
+    }
+
     if print_config["conv_layer1_W"]:
         print_convlayer1_W = theano.function(
             inputs = [],
-            outputs = theano.printing.Print(layers[1].W.name)(layers[1].W)
+            outputs = theano.printing.Print("conv_l1.W")(layers[1].W)
         )
 
     if print_config["conv_layer2_W"]:
         print_convlayer2_W = theano.function(
             inputs = [],
-            outputs = theano.printing.Print(layers[2].W.name)(layers[2].W)
+            outputs = theano.printing.Print("conv_l2.W")(layers[2].W)
         )
 
     if print_config["p_y_given_x"]:
         print_p_y_given_x = theano.function(
-            inputs = [],
+            inputs = [batch_index],
             outputs = theano.printing.Print("p_y_given_x")(layers[-1].p_y_given_x),
-            givens = {
-                x: train_set_x
-            }
-        )
-    
-    param_n = sum([1. for l in param_layers for p in l.params])
-    if print_config["print_param_weight_mean"]:
-        get_param_weight_mean = theano.function(
-            inputs = [], 
-            outputs = T.sum([T.sum(T.abs_(p)) 
-                             for l in param_layers for p in l.params]) / param_n
+            givens = train_data_at_index
         )
 
+    if print_config["l1_output"]:
+        print_l1_output = theano.function(
+            inputs = [batch_index],
+            outputs = theano.printing.Print("l1_output")(layers[0].output),
+            givens = train_data_at_index
+        )
+        
+    if print_config["l2_output"]:
+        print_l2_output = theano.function(
+            inputs = [batch_index],
+            outputs = theano.printing.Print("l2_output")(layers[1].output),
+            givens = train_data_at_index
+        )
+
+    if print_config["dropout_l2_output"]:
+        print_dropout_l2_output = theano.function(
+            inputs = [batch_index],
+            outputs = theano.printing.Print("dropout_l2_output")(dropout_layers[1].output),
+            givens = train_data_at_index
+        )
+
+    if print_config["l3_output"]:
+        print_l3_output = theano.function(
+            inputs = [batch_index],
+            outputs = theano.printing.Print("l3_output")(layers[2].output),
+            givens = train_data_at_index
+        )
+        
+    param_n = sum([1. for l in param_layers for p in l.params])
+    if print_config["param_weight_mean"]:
+        print_param_weight_mean = theano.function(
+            inputs = [], 
+            outputs = [theano.printing.Print("weight mean:" + p.name)(
+                T.mean(T.abs_(p))
+            )
+                       for l in param_layers
+                       for p in l.params]
+        )
+
+    
     #the training loop
     patience = 10000  # look as this many examples regardless
     patience_increase = 2  # wait this much longer when a new best is
@@ -691,7 +734,10 @@ def train_and_test(
             train_cost = train_model(minibatch_index)
 
             if print_config["nnl"]:
-                nnls.append(get_nnl(minibatch_index))
+                nnl = get_nnl(minibatch_index)
+                print "nll for batch %d: %f" %(minibatch_index, nnl)
+                
+                nnls.append(nnl)
                 
             if print_config["L2_sqr"]:
                 L2_sqrs.append(get_L2_sqr())            
@@ -706,25 +752,38 @@ def train_and_test(
 
             if (minibatch_index+1) % 50 == 0 or minibatch_index == n_train_batches - 1:
                 print "%d / %d minibatches completed" %(minibatch_index + 1, n_train_batches)                
-
-            if (iter + 1) % validation_frequency == 0:
                 if print_config["nnl"]:
                     print "`nnl` for the past 50 minibatches is %f" %(np.mean(np.array(nnls)))
                     nnls = []
                 if print_config["L2_sqr"]:
                     print "`L2_sqr`` for the past 50 minibatches is %f" %(np.mean(np.array(L2_sqrs)))
-                    L2_sqrs = []
-                if print_config["print_param_weight_mean"]:
-                    print "weight mean %f: " %(get_param_weight_mean())
-
-                if print_config["conv_layer2_W"]:
-                    print_convlayer2_W()
+                    L2_sqrs = []                                    
 
                 if print_config["conv_layer1_W"]:
                     print_convlayer1_W()
 
+                if print_config["conv_layer2_W"]:
+                    print_convlayer2_W()
+
                 if print_config["p_y_given_x"]:
-                    print_p_y_given_x()
+                    print_p_y_given_x(minibatch_index)
+
+                if print_config["l1_output"]:
+                    print_l1_output(minibatch_index)
+
+                if print_config["l2_output"]:
+                    print_l2_output(minibatch_index)
+
+                if print_config["dropout_l2_output"]:
+                    print_dropout_l2_output(minibatch_index)
+
+                if print_config["l3_output"]:
+                    print_l3_output(minibatch_index)
+
+
+            if (iter + 1) % validation_frequency == 0:
+                if print_config["param_weight_mean"]:
+                    print_param_weight_mean()
 
                 if print_config["adadelta_lr_mean"]:
                     print_adadelta_lr_mean()
@@ -755,7 +814,6 @@ def train_and_test(
     print >> sys.stderr, ('The code for file ' +
                           os.path.split(__file__)[1] +
                           ' ran for %.2fm' % ((end_time - start_time) / 60.))
-
     
 if __name__ == "__main__":
     print_config = {
@@ -763,23 +821,27 @@ if __name__ == "__main__":
         "adagrad_lr_mean": 0,
         "logreg_W": 0,
         "logreg_b": 0,
-        "conv_layer2_W": 0,
         "conv_layer1_W": 0,
-        "grad_abs_mean": 0,
+        "conv_layer2_W": 0,
+        "l1_output": 0,
+        "l2_output": 0,
+        "dropout_l2_output": 0,
+        "l3_output": 0,
         "p_y_given_x": 1,
         "embeddings": 0,
+        "grad_abs_mean": 0,
         "nnl": 1,
         "L2_sqr": 1,
-        "print_param_weight_mean": 0,
+        "param_weight_mean": 0,
     }
     
     train_and_test(
-        lr_update_method = "adagrad",
+        lr_update_method = None,
         use_L2_reg = True, 
         L2_regs= [0.00001, 0.0003, 0.0003, 0.0001],
-        fan_in_fan_out = False,
+        fan_in_fan_out = True,
         delay_embedding_learning = True,
-        conv_activation_unit = "relu", 
+        conv_activation_unit = "tanh", 
         learning_rate = 0.0001, 
         batch_size = 10, 
         print_config = print_config, 
