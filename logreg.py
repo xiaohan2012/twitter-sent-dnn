@@ -3,7 +3,10 @@ import theano.tensor as T
 import numpy as np
 
 class LogisticRegression(object):
-    def __init__(self, rng, input, n_in, n_out):
+    def __init__(self, rng, input, n_in, n_out,
+                 W = None,
+                 b = None
+    ):
         """ Initialize the parameters of the logistic regression
 
         :type: rng: 
@@ -21,18 +24,24 @@ class LogisticRegression(object):
         :param n_out: number of output units, the dimension of the space in
                       which the labels lie
 
+        W and b: theano.tensor.TensorType
         """        
-        self.W = theano.shared(value = np.asarray(rng.normal(0, 0.05, (n_in, n_out)),
-                                                  dtype = theano.config.floatX
-                                              ), 
-                               name = 'logreg_W',
-                               borrow = True
-                           )
-
-        self.b = theano.shared(value = np.zeros((n_out, ), 
-                                                dtype = theano.config.floatX),
-                               name = 'logreg_b',
-                               borrow = True)
+        if W:
+            self.W = W
+        else:
+            self.W = theano.shared(value = np.asarray(rng.normal(0, 0.05, (n_in, n_out)),
+                                                      dtype = theano.config.floatX
+                                                  ), 
+                                   name = 'logreg_W',
+                                   borrow = True
+                               )
+        if b:
+            self.b = b
+        else:
+            self.b = theano.shared(value = np.zeros((n_out, ), 
+                                                    dtype = theano.config.floatX),
+                                   name = 'logreg_b',
+                                   borrow = True)
 
         # the probability of labels given the data
         self.p_y_given_x = T.nnet.softmax(T.dot(input, self.W) + self.b)
