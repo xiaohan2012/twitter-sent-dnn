@@ -261,11 +261,11 @@ class DropoutLayer(object):
 def train_and_test(
         use_pretrained_embedding = False,
         fold_flags = [1,1],
-        lr_update_method = "adadelta",
         use_L2_reg = True,
         learning_rate = 0.1,
         fan_in_fan_out = True,
         delay_embedding_learning = True,
+        embedding_learning_delay_epochs = 10,
         conv_activation_unit = "tanh", 
         epsilon = 0.000001,
         rho = 0.95,
@@ -283,8 +283,6 @@ def train_and_test(
         conv_sizes = [10, 7],
         print_config = {}
 ):
-    if lr_update_method:
-        assert lr_update_method in ("adadelta", "adagrad")
 
     assert conv_layer_n == len(conv_sizes) == len(nkerns) == (len(L2_regs) - 2) == len(fold_flags) == len(ks)
 
@@ -434,157 +432,138 @@ def train_and_test(
     layers.append(output_layer)
 
     ###############################
-    # Parameters to be used       #
-    ##############################
-    if not delay_embedding_learning:
-        print "Immediate embedding learning. "
-        param_layers = dropout_layers
-    else:
-        print "Delay embedding learning."
-        param_layers = dropout_layers[1:] # exclude the embedding layer
-    print "param_layers: %r" %param_layers
-        
-    params = [param for layer in param_layers for param in layer.params]
-    param_shapes=  [param for layer in param_layers for param in layer.param_shapes]
-
-
+    # Error and cost              #
+    ###############################
     # cost and error come from different model!
     dropout_cost = dropout_output_layer.nnl(y)
     errors = output_layer.errors(y)
     
-    ############################
-    # L2 regularizer           #
-    ############################
+    def get_L2_sqr(param_layers):
+        return T.sum([
+            L2_reg / 2 * ((layer.W if hasattr(layer, "W") else layer.embeddings) ** 2).sum()
+            for L2_reg, layer in zip(L2_regs, param_layers)
+        ])
+    L2_sqr = get_L2_sqr(dropout_layers)
+    L2_sqr_no_ebd = get_L2_sqr(dropout_layers[1:])
     
-    L2_sqr = T.sum([
-        L2_reg / 2 * ((layer.W if hasattr(layer, "W") else layer.embeddings) ** 2).sum()
-        for L2_reg, layer in zip(L2_regs, param_layers)
-    ])
-    
-    ############################
-    # Training function and    #
-    # AdaDelta learning rate   #
-    ############################
     if use_L2_reg:
         cost = dropout_cost + L2_sqr
+        cost_no_ebd = dropout_cost + L2_sqr_no_ebd
     else:
         cost = dropout_cost
-        
-
-    param_grads = [T.grad(cost, param) for param in params]
     
-    if lr_update_method == "adadelta":
-        # AdaDelta parameter update
-        # E[g^2]
-        # initialized to zero
-        egs = [
-            theano.shared(
-                value = np.zeros(param_shape,
-                                 dtype = theano.config.floatX
-                             ),
-                borrow = True,        
-                name = "Eg:" + param.name
-            )
-            for param_shape, param in zip(param_shapes, params)
-        ]
-
-        # E[\delta x^2]
-        # initialized to zero
-        exs = [
-            theano.shared(
-                value = np.zeros(param_shape,
-                                 dtype = theano.config.floatX
-                             ),
-                borrow = True,        
-                name = "Ex:" + param.name
-            )
-            for param_shape, param in zip(param_shapes, params)
-        ]
-    
-        print "Using AdaDelta with rho = %f and epsilon = %f" %(rho, epsilon)
-        
-        new_egs = [
-            rho * eg + (1 - rho) * g ** 2
-            for eg, g in zip(egs, param_grads)
-        ]
-        
-        delta_x = [
-            -(T.sqrt(ex + epsilon) / T.sqrt(new_eg + epsilon)) * g
-            for new_eg, ex, g in zip(new_egs, exs, param_grads)
-        ]
-        new_exs = [
-            rho * ex + (1 - rho) * (dx ** 2)
-            for ex, dx in zip(exs, delta_x)
-        ]
-
-        egs_updates = zip(egs, new_egs)
-        exs_updates = zip(exs, new_exs)
-        param_updates = [
-            (p, p + dx)
-            for dx, g, p in zip(delta_x, param_grads, params)
-        ]
-        
-        updates = egs_updates + exs_updates + param_updates
-    elif lr_update_method == "adagrad":
-        print "Using AdaGrad with gamma = %f and epsilon = %f" %(gamma, epsilon)
-        grad_hists = [
-            theano.shared(
-                value = np.zeros(param_shape,
-                                 dtype = theano.config.floatX
-                             ),
-                borrow = True,        
-                name = "grad_hist:" + param.name
-            )
-            for param_shape, param in zip(param_shapes, params)
-        ]
-        
-        new_grad_hists = [
-            g_hist + g ** 2
-            for g_hist, g in zip(grad_hists, param_grads)
-        ]
-        
-        param_updates = [
-            (param, param - gamma * epsilon / (T.sqrt(g_hist) + epsilon) * param_grad)
-            for param, param_grad in zip(params, param_grads)
-        ]
-
-        grad_hist_update = zip(grad_hists, new_grad_hists)
-
-        updates = grad_hist_update + param_updates
+    ###############################
+    # Parameters to be used       #
+    ###############################
+    if not delay_embedding_learning:
+        print "Immediate embedding learning. "
+        embedding_learning_delay_epochs = 0        
     else:
-        print "Using const learning rate: %f" %(learning_rate)
-        updates = [
-            (param, param - learning_rate * param_grad)
-            for param, param_grad in zip(params, param_grads)
-        ]
+        print "Delay embedding learning by %d epochs" %(embedding_learning_delay_epochs)
         
-    train_model = theano.function(inputs = [batch_index],
-                                  outputs = [cost], 
-                                  updates = updates,
-                                  givens = {
-                                      x: train_set_x[batch_index * batch_size: (batch_index + 1) * batch_size],
-                                      y: train_set_y[batch_index * batch_size: (batch_index + 1) * batch_size]
-                                  },
-    )
-
-        
-    train_error = theano.function(inputs = [],
-                                  outputs = errors, 
-                                  givens = {
-                                      x: train_set_x,
-                                      y: train_set_y
-                                  }, 
-    )
-
-    valid_error = theano.function(inputs = [],
-                                  outputs = errors, 
-                                  givens = {
-                                      x: valid_set_x,
-                                      y: valid_set_y
-                                  }, 
-                                  # mode = "DebugMode"
-    )
+    print "param_layers: %r" %dropout_layers
+    param_layers = dropout_layers
     
+    ##############################
+    # Parameter Update           #
+    ##############################
+    print "Using AdaDelta with rho = %f and epsilon = %f" %(rho, epsilon)
+    
+    params = [param for layer in param_layers for param in layer.params]
+    param_shapes=  [param for layer in param_layers for param in layer.param_shapes]                                
+    
+    param_grads = [T.grad(cost, param) for param in params]
+
+    # AdaDelta parameter update
+    # E[g^2]
+    # initialized to zero
+    egs = [
+        theano.shared(
+            value = np.zeros(param_shape,
+                             dtype = theano.config.floatX
+                         ),
+            borrow = True,        
+            name = "Eg:" + param.name
+        )
+        for param_shape, param in zip(param_shapes, params)
+    ]
+    
+    # E[\delta x^2], initialized to zero
+    exs = [
+        theano.shared(
+            value = np.zeros(param_shape,
+                             dtype = theano.config.floatX
+                         ),
+            borrow = True,        
+            name = "Ex:" + param.name
+        )
+        for param_shape, param in zip(param_shapes, params)
+    ]        
+    
+    new_egs = [
+        rho * eg + (1 - rho) * g ** 2
+        for eg, g in zip(egs, param_grads)
+    ]
+        
+    delta_x = [
+        -(T.sqrt(ex + epsilon) / T.sqrt(new_eg + epsilon)) * g
+        for new_eg, ex, g in zip(new_egs, exs, param_grads)
+    ]    
+    
+    new_exs = [
+        rho * ex + (1 - rho) * (dx ** 2)
+        for ex, dx in zip(exs, delta_x)
+    ]    
+    
+    egs_updates = zip(egs, new_egs)
+    exs_updates = zip(exs, new_exs)
+    param_updates = [
+        (p, p + dx)
+        for dx, g, p in zip(delta_x, param_grads, params)
+    ]
+
+    updates = egs_updates + exs_updates + param_updates
+    print "updates:\n", updates
+    
+    # updates without embedding
+    # exclude the first parameter
+    egs_updates_no_ebd = zip(egs[1:], new_egs[1:])
+    exs_updates_no_ebd = zip(exs[1:], new_exs[1:])
+    param_updates_no_ebd = [
+        (p, p + dx)
+        for dx, g, p in zip(delta_x, param_grads, params)[1:]
+    ]
+    updates_no_emb = egs_updates_no_ebd + exs_updates_no_ebd + param_updates_no_ebd
+    
+    print "updates_no_emb:\n", updates_no_emb
+    
+    def make_train_func(cost, updates):
+        return theano.function(inputs = [batch_index],
+                               outputs = [cost], 
+                               updates = updates,
+                               givens = {
+                                   x: train_set_x[batch_index * batch_size: (batch_index + 1) * batch_size],
+                                   y: train_set_y[batch_index * batch_size: (batch_index + 1) * batch_size]
+                               },
+        )        
+
+    train_model_no_ebd = make_train_func(cost_no_ebd, updates_no_emb)
+    train_model = make_train_func(cost, updates)
+
+    def make_error_func(x_val, y_val):
+        return theano.function(inputs = [],
+                               outputs = errors, 
+                               givens = {
+                                   x: x_val,
+                                   y: y_val
+                               }, 
+                           )
+        
+    train_error = make_error_func(train_set_x, train_set_y)
+
+    valid_error = make_error_func(valid_set_x, valid_set_y)
+    
+
     #############################
     # Debugging purpose code    #
     #############################
@@ -593,7 +572,6 @@ def train_and_test(
     
     train_data_at_index = {
         x: train_set_x[batch_index * batch_size: (batch_index + 1) * batch_size],
-        # y: train_set_y[batch_index * batch_size: (batch_index + 1) * batch_size]
     }
 
     train_data_at_index_with_y = {
@@ -841,6 +819,11 @@ def train_and_test(
             epoch += 1
             print "At epoch {0}".format(epoch)
 
+            if epoch == (embedding_learning_delay_epochs + 1):
+                print "########################"
+                print "Start training embedding"
+                print "########################"
+
             # shuffle the training data        
             train_set_x_data = train_set_x.get_value(borrow = True)
             train_set_y_data = train_set_y.get_value(borrow = True)        
@@ -850,8 +833,10 @@ def train_and_test(
             train_set_x.set_value(train_set_x_data[permutation])
             train_set_y.set_value(train_set_y_data[permutation])
             for minibatch_index in xrange(n_train_batches):
-               
-                train_cost = train_model(minibatch_index)
+                if epoch >= (embedding_learning_delay_epochs + 1):
+                    train_cost = train_model(minibatch_index)
+                else:
+                    train_cost = train_model_no_ebd(minibatch_index)
 
                 if print_config["nnl"]:
                     nnl = get_nnl(minibatch_index)
@@ -1020,11 +1005,11 @@ if __name__ == "__main__":
     train_and_test(
         use_pretrained_embedding = True,
         fold_flags =  [0, 0],
-        lr_update_method = "adadelta",
         use_L2_reg = True, 
         L2_regs= np.array([0.00001, 0.0003, 0.0003, 0.0001]) * 10,
         fan_in_fan_out = True,
         delay_embedding_learning = True,
+        embedding_learning_delay_epochs = 4,
         conv_activation_unit = "tanh", 
         learning_rate = 0.0001, 
         batch_size = 10, 
