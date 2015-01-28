@@ -520,7 +520,7 @@ def train_and_test(
         egs_updates = zip(egs, new_egs)
         exs_updates = zip(exs, new_exs)
         param_updates = [
-            (p, p + dx*g)
+            (p, p + dx)
             for dx, g, p in zip(delta_x, param_grads, params)
         ]
         
@@ -1020,7 +1020,7 @@ if __name__ == "__main__":
     train_and_test(
         use_pretrained_embedding = True,
         fold_flags =  [0, 0],
-        lr_update_method = "adagrad",
+        lr_update_method = "adadelta",
         use_L2_reg = True, 
         L2_regs= np.array([0.00001, 0.0003, 0.0003, 0.0001]) * 10,
         fan_in_fan_out = True,

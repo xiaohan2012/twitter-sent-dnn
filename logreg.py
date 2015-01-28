@@ -69,7 +69,8 @@ class LogisticRegression(object):
         Cross entropy
         y: the correct label
         """
-        return T.
+        # return T.
+        
     def errors(self, y):
         """
         the error rate
