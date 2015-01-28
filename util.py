@@ -234,10 +234,15 @@ def process_stanford_sentiment_corpus(train_path, dev_path, test_path,
                                         for l in test_f])
 
     # gathering sentence length information
+    sent_lens = [len(sent) 
+                 for sent in train_sents]
+    train_sent_max_len = max(sent_lens)
+    print "train_sent_max_len: %d" %(train_sent_max_len)
+    print "sent_mean_len: %f" %(np.mean(sent_lens))
+    print "sent_median_len: %f" %(np.median(sent_lens))
+    
     train_sent_max_len = max((len(sent) 
                               for sent in train_sents))
-    print "train_sent_max_len: %d" %(train_sent_max_len)
-
     dev_sent_max_len = max((len(sent) 
                               for sent in dev_sents))
     print "dev_sent_max_len: %d" %(dev_sent_max_len)

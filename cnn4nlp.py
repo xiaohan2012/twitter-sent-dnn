@@ -21,31 +21,41 @@ class WordEmbeddingLayer(object):
     def __init__(self, rng, 
                  input,
                  vocab_size, 
-                 embed_dm):
+                 embed_dm, 
+                 embeddings = None,
+    ):
         """
         input: theano.tensor.dmatrix, (number of instances, sentence word number)
         
         vocab_size: integer, the size of vocabulary,
 
         embed_dm: integer, the dimension of word vector representation
+
+        embeddings: theano.tensor.TensorType
+        pretrained embeddings
         """                
-        # embedding_val = np.asarray(
-        #     rng.normal(0, 0.05, (vocab_size, embed_dm)), 
-        #     dtype = theano.config.floatX
-        # )
-        embedding_val = np.asarray(
-            rng.uniform(low = -0.5, high = 0.5, size = (vocab_size, embed_dm)), 
-            dtype = theano.config.floatX
-        )
-        
-        embedding_val[vocab_size-1,:] = 0 # the <PAD> character is intialized to 0
-        
-        self.embeddings = theano.shared(
-            np.asarray(embedding_val, 
-                       dtype = theano.config.floatX),
-            borrow = True,
-            name = 'embeddings'
-        )
+        if embeddings:
+            print "use pretrained embeddings"
+            assert embeddings.get_value().shape == (vocab_size, embed_dm), "%r != %r" %(
+                embeddings.get_value().shape, 
+                (vocab_size, embed_dm)
+            )
+            
+            self.embeddings = embeddings
+        else:
+            embedding_val = np.asarray(
+                rng.uniform(low = -0.5, high = 0.5, size = (vocab_size, embed_dm)), 
+                dtype = theano.config.floatX
+            )
+            
+            embedding_val[vocab_size-1,:] = 0 # the <PADDING> character is intialized to 0
+            
+            self.embeddings = theano.shared(
+                np.asarray(embedding_val, 
+                           dtype = theano.config.floatX),
+                borrow = True,
+                name = 'embeddings'
+            )
 
         
         self.params = [self.embeddings]
@@ -249,6 +259,7 @@ class DropoutLayer(object):
         self.output = input * T.cast(mask, theano.config.floatX)
 
 def train_and_test(
+        use_pretrained_embedding = False,
         fold_flags = [1,1],
         lr_update_method = "adadelta",
         use_L2_reg = True,
@@ -260,7 +271,7 @@ def train_and_test(
         rho = 0.95,
         gamma = 0.1,
         embed_dm = 48,        
-        k_top = 5,
+        ks = [15, 6],
         L2_regs= [0.00001, 0.0003, 0.0003, 0.0001],
         n_hidden = 500,
         batch_size = 500,
@@ -275,7 +286,7 @@ def train_and_test(
     if lr_update_method:
         assert lr_update_method in ("adadelta", "adagrad")
 
-    assert conv_layer_n == len(conv_sizes) == len(nkerns) == (len(L2_regs) - 2) == len(fold_flags)
+    assert conv_layer_n == len(conv_sizes) == len(nkerns) == (len(L2_regs) - 2) == len(fold_flags) == len(ks)
 
     ###################
     # get the data    #
@@ -305,6 +316,17 @@ def train_and_test(
     
     rng = np.random.RandomState(1234)        
         
+    ###############################
+    # Load pretrained embedding   #
+    ###############################    
+    pretrained_embeddings = theano.shared(
+        value = np.asarray(
+            np.load("data/stanfordSentimentTreebank/trees/pretrained.npy"), 
+            dtype=theano.config.floatX
+        ),
+        name = "embeddings", 
+        borrow = True,
+    )
     
     ###############################
     # Construction of the network #
@@ -314,7 +336,10 @@ def train_and_test(
     layer1 = WordEmbeddingLayer(rng, 
                                 input = x, 
                                 vocab_size = len(word2index), 
-                                embed_dm = embed_dm)    
+                                embed_dm = embed_dm, 
+                                embeddings = (
+                                    pretrained_embeddings 
+                                    if use_pretrained_embedding else None))
     
     dropout_layers = [layer1]
     layers = [layer1]
@@ -339,8 +364,9 @@ def train_and_test(
             conv_sizes[i]
         )
         
-        k = int(max(k_top, 
-                    math.ceil((conv_layer_n - float(i+1)) / conv_layer_n * train_sent_len)))
+        k = ks[i]
+        # k = int(max(k_top, 
+        #             math.ceil((conv_layer_n - float(i+1)) / conv_layer_n * train_sent_len)))
         
         print "For conv layer(%s) %d, filter shape = %r, k = %d, dropout_rate = %f and fan_in_fan_out: %r and fold: %d" %(
             conv_activation_unit, 
@@ -382,9 +408,9 @@ def train_and_test(
     # last, the output layer
     # both dropout and without dropout
     if sum(fold_flags) > 0:
-        n_in = nkerns[-1] * k_top * embed_dm / (sum(fold_flags)*2)
+        n_in = nkerns[-1] * ks[-1] * embed_dm / (sum(fold_flags)*2)
     else:
-        n_in = nkerns[-1] * k_top * embed_dm
+        n_in = nkerns[-1] * ks[-1] * embed_dm
         
     print "For output layer, n_in = %d, dropout_rate = %f" %(n_in, dropout_rates[-1])
     
@@ -500,7 +526,7 @@ def train_and_test(
         
         updates = egs_updates + exs_updates + param_updates
     elif lr_update_method == "adagrad":
-        print "Using AdaGrad with gamma = %f" %(gamma)
+        print "Using AdaGrad with gamma = %f and epsilon = %f" %(gamma, epsilon)
         grad_hists = [
             theano.shared(
                 value = np.zeros(param_shape,
@@ -517,20 +543,9 @@ def train_and_test(
             for g_hist, g in zip(grad_hists, param_grads)
         ]
         
-        sqs = [
-            T.sqrt(g_hist)
-            for g_hist in new_grad_hists
-        ]
-                
-        
-        sqs = [
-            T.set_subtensor(sq[sq != 0], gamma / sq[sq != 0])  #same as, sq[sq != 0] = gamma / sq[sq != 0]
-            for sq in sqs
-        ]
-
         param_updates = [
-            (param, param - sq * param_grad)
-            for sq, param, param_grad in zip(sqs, params, param_grads)
+            (param, param - gamma * epsilon / (T.sqrt(g_hist) + epsilon) * param_grad)
+            for param, param_grad in zip(params, param_grads)
         ]
 
         grad_hist_update = zip(grad_hists, new_grad_hists)
@@ -840,8 +855,7 @@ def train_and_test(
 
                 if print_config["nnl"]:
                     nnl = get_nnl(minibatch_index)
-                    print "nll for batch %d: %f" %(minibatch_index, nnl)
-                    
+                    # print "nll for batch %d: %f" %(minibatch_index, nnl)
                     nnls.append(nnl)
                     
                 if print_config["L2_sqr"]:
@@ -872,7 +886,10 @@ def train_and_test(
                 
                 # print_grads(minibatch_index)
                 # print_learning_rates()
-                # print_embeddings()
+
+                if print_config["embeddings"]:
+                    print_embeddings()
+
                 # print_logreg_param()
                 
                 # iteration number
@@ -971,6 +988,7 @@ if __name__ == "__main__":
         "adadelta_lr_mean": 0,
         "adagrad_lr_mean": 0,
         
+        "embeddings": 0,
         "logreg_W": 0,
         "logreg_b": 0,
         
@@ -988,22 +1006,23 @@ if __name__ == "__main__":
         "dropout_l1_output": 0,
         "l2_output": 0,        
         "dropout_l2_output": 0,
-
         "l3_output": 0,
+
         "p_y_given_x": 0,
-        "embeddings": 0,
+        
         "grad_abs_mean": 0,
-        "nnl": 0,
-        "L2_sqr": 0,
+        "nnl": 1,
+        "L2_sqr": 1,
         "param_weight_mean": 0,
     }
     
 
     train_and_test(
+        use_pretrained_embedding = True,
         fold_flags =  [0, 0],
-        lr_update_method = None,
+        lr_update_method = "adagrad",
         use_L2_reg = True, 
-        L2_regs= [0.00001, 0.0003, 0.0003, 0.0001],
+        L2_regs= np.array([0.00001, 0.0003, 0.0003, 0.0001]) * 10,
         fan_in_fan_out = True,
         delay_embedding_learning = True,
         conv_activation_unit = "tanh", 
