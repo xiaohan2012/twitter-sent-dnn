@@ -37,14 +37,14 @@ class WordEmbeddingLayer(object):
         # embed_val = np.concatenate((embed_val_except_pad, pad_val), 
         #                            axis = 0)
         
-        # embedding_val = np.asarray(
-        #     rng.normal(0, 0.05, (vocab_size, embed_dm)), 
-        #     dtype = theano.config.floatX
-        # )
         embedding_val = np.asarray(
-            rng.uniform(low = -0.5, high = 0.5, size = (vocab_size, embed_dm)), 
+            rng.normal(0, 0.05, (vocab_size, embed_dm)), 
             dtype = theano.config.floatX
         )
+        # embedding_val = np.asarray(
+        #     rng.uniform(low = 0, high = 0.5, size = (vocab_size, embed_dm)), 
+        #     dtype = theano.config.floatX
+        # )
         
         embedding_val[vocab_size-1,:] = 0 # the <PAD> character is intialized to 0
         
@@ -96,7 +96,7 @@ class ConvFoldingPoolLayer(object):
            the k value in the max-pooling layer
 
         activation: str
-           the activation unit type, `tanh` or `relu`
+           the activation unit type, `tanh` or `relu` or 'sigmoid'
 
         fan_in_fan_out: bool
            whether use fan-in fan-out initialization or not. Default, True
@@ -116,7 +116,7 @@ class ConvFoldingPoolLayer(object):
         self.k = k
         self.filter_shape = filter_shape
 
-        assert activation in ('tanh', 'relu')
+        assert activation in ('tanh', 'relu', 'sigmoid')
         self.activation = activation
         
         if W is not None:
@@ -223,6 +223,8 @@ class ConvFoldingPoolLayer(object):
         if self.activation == "tanh":
             # return theano.printing.Print("tanh(pool_out)")(T.tanh(pool_out))
             return T.tanh(pool_out)
+        elif self.activation == "sigmoid":
+            return T.nnet.sigmoid(pool_out)
         else:
             return T.switch(pool_out > 0, pool_out, 0)
 
@@ -260,7 +262,7 @@ def train_and_test(
         L2_regs= [0.00001, 0.0003, 0.0003, 0.0001],
         n_hidden = 500,
         batch_size = 500,
-        n_epochs = 2000, 
+        n_epochs = 200, 
         dropout_switches = [True, True, True], 
         dropout_rates = [0.2, 0.5, 0.5],
         conv_layer_n = 2,
@@ -564,6 +566,16 @@ def train_and_test(
     # : PARAMETER TUNING NOTE:
     # some demonstration of the gradient vanishing probelm
     
+    train_data_at_index = {
+        x: train_set_x[batch_index * batch_size: (batch_index + 1) * batch_size],
+        # y: train_set_y[batch_index * batch_size: (batch_index + 1) * batch_size]
+    }
+
+    train_data_at_index_with_y = {
+        x: train_set_x[batch_index * batch_size: (batch_index + 1) * batch_size],
+        y: train_set_y[batch_index * batch_size: (batch_index + 1) * batch_size]
+    }
+
     if print_config["nnl"]:
         get_nnl = theano.function(
             inputs = [batch_index],
@@ -593,6 +605,80 @@ def train_and_test(
                 y: train_set_y
             }
         )
+
+    activations = [
+        l.output
+        for l in dropout_layers[1:-1]
+    ]
+    weight_grads = [
+        T.grad(cost, l.W)
+        for l in dropout_layers[1:-1]
+    ]
+
+    if print_config["activation_hist"]:
+        # turn into 1D array
+        get_activations = theano.function(
+            inputs = [batch_index], 
+            outputs = [
+                val.flatten(1)
+                for val in activations
+            ], 
+            givens = train_data_at_index
+        )
+
+    if print_config["weight_grad_hist"]:
+        # turn into 1D array
+        get_weight_grads = theano.function(
+            inputs = [batch_index], 
+            outputs = [
+                val.flatten(1)
+                for val in weight_grads
+            ], 
+            givens = train_data_at_index_with_y
+        )
+        
+    if print_config["activation_tracking"]:
+        # get the mean and variance of activations for each conv layer                
+        
+        get_activation_mean = theano.function(
+            inputs = [batch_index], 
+            outputs = [
+                T.mean(val)
+                for val in activations
+            ], 
+            givens = train_data_at_index
+        )
+
+        get_activation_std = theano.function(
+            inputs = [batch_index], 
+            outputs = [
+                T.std(val)
+                for val in activations
+            ], 
+            givens = train_data_at_index
+        )
+
+
+    if print_config["weight_grad_tracking"]:
+        # get the mean and variance of activations for each conv layer
+        get_weight_grad_mean = theano.function(
+            inputs = [batch_index], 
+            outputs = [
+                T.mean(g)
+                for g in weight_grads
+            ], 
+            givens = train_data_at_index_with_y
+        )
+
+        get_weight_grad_std = theano.function(
+            inputs = [batch_index], 
+            outputs = [
+                T.std(g)
+                for g in weight_grads
+            ], 
+            givens = train_data_at_index_with_y
+        )
+        
     if print_config["adadelta_lr_mean"]:
         print_adadelta_lr_mean = theano.function(
             inputs = [],
@@ -632,11 +718,6 @@ def train_and_test(
             inputs = [],
             outputs = theano.printing.Print(layers[-1].b.name)(layers[-1].b)
         )
-
-    train_data_at_index = {
-        x: train_set_x[batch_index * batch_size: (batch_index + 1) * batch_size],
-        # y: train_set_y[batch_index * batch_size: (batch_index + 1) * batch_size]
-    }
 
     if print_config["conv_layer1_W"]:
         print_convlayer1_W = theano.function(
@@ -716,96 +797,148 @@ def train_and_test(
     nnls = []
     L2_sqrs = []
     
-    while (epoch < n_epochs) and (not done_looping):
-        epoch += 1
-        print "At epoch {0}".format(epoch)
+    activation_means = [[] for i in xrange(conv_layer_n)]
+    activation_stds = [[] for i in xrange(conv_layer_n)]
+    weight_grad_means = [[] for i in xrange(conv_layer_n)]
+    weight_grad_stds = [[] for i in xrange(conv_layer_n)]
+    activation_hist_data = [[] for i in xrange(conv_layer_n)]
+    weight_grad_hist_data = [[] for i in xrange(conv_layer_n)]
+    try:
+        while (epoch < n_epochs) and (not done_looping):
+            epoch += 1
+            print "At epoch {0}".format(epoch)
 
-        # shuffle the training data        
-        train_set_x_data = train_set_x.get_value(borrow = True)
-        train_set_y_data = train_set_y.get_value(borrow = True)        
-        
-        permutation = np.random.permutation(train_set_x.get_value(borrow=True).shape[0])
-
-        train_set_x.set_value(train_set_x_data[permutation])
-        train_set_y.set_value(train_set_y_data[permutation])
-        
-        for minibatch_index in xrange(n_train_batches):
-           
-            train_cost = train_model(minibatch_index)
-
-            if print_config["nnl"]:
-                nnl = get_nnl(minibatch_index)
-                print "nll for batch %d: %f" %(minibatch_index, nnl)
-                
-                nnls.append(nnl)
-                
-            if print_config["L2_sqr"]:
-                L2_sqrs.append(get_L2_sqr())            
-                
-            # print_grads(minibatch_index)
-            # print_learning_rates()
-            # print_embeddings()
-            # print_logreg_param()
+            # shuffle the training data        
+            train_set_x_data = train_set_x.get_value(borrow = True)
+            train_set_y_data = train_set_y.get_value(borrow = True)        
             
-            # iteration number
-            iter = (epoch - 1) * n_train_batches + minibatch_index
+            permutation = np.random.permutation(train_set_x.get_value(borrow=True).shape[0])
 
-            if (minibatch_index+1) % 50 == 0 or minibatch_index == n_train_batches - 1:
-                print "%d / %d minibatches completed" %(minibatch_index + 1, n_train_batches)                
+            train_set_x.set_value(train_set_x_data[permutation])
+            train_set_y.set_value(train_set_y_data[permutation])
+            for minibatch_index in xrange(n_train_batches):
+               
+                train_cost = train_model(minibatch_index)
+
                 if print_config["nnl"]:
-                    print "`nnl` for the past 50 minibatches is %f" %(np.mean(np.array(nnls)))
-                    nnls = []
+                    nnl = get_nnl(minibatch_index)
+                    print "nll for batch %d: %f" %(minibatch_index, nnl)
+                    
+                    nnls.append(nnl)
+                    
                 if print_config["L2_sqr"]:
-                    print "`L2_sqr`` for the past 50 minibatches is %f" %(np.mean(np.array(L2_sqrs)))
-                    L2_sqrs = []                                    
+                    L2_sqrs.append(get_L2_sqr())            
+                    
+                if print_config["activation_tracking"]:
+                    layer_means = get_activation_mean(minibatch_index)
+                    layer_stds = get_activation_std(minibatch_index)
+                    for layer_ms, layer_ss, layer_m, layer_s in zip(activation_means, activation_stds, layer_means, layer_stds):
+                        layer_ms.append(layer_m)
+                        layer_ss.append(layer_s)
 
-                if print_config["conv_layer1_W"]:
-                    print_convlayer1_W()
+                if print_config["weight_grad_tracking"]:
+                    layer_means = get_weight_grad_mean(minibatch_index)
+                    layer_stds = get_weight_grad_std(minibatch_index)
+                    
+                    for layer_ms, layer_ss, layer_m, layer_s in zip(weight_grad_means, weight_grad_stds, layer_means, layer_stds):
+                        layer_ms.append(layer_m)
+                        layer_ss.append(layer_s)
 
-                if print_config["conv_layer2_W"]:
-                    print_convlayer2_W()
+                if print_config["activation_hist"]:
+                    for layer_hist, layer_data in zip(activation_hist_data , get_activations(minibatch_index)):
+                        layer_hist += layer_data.tolist()
 
-                if print_config["p_y_given_x"]:
-                    print_p_y_given_x(minibatch_index)
+                if print_config["weight_grad_hist"]:
+                    for layer_hist, layer_data in zip(weight_grad_hist_data , get_weight_grads(minibatch_index)):
+                        layer_hist += layer_data.tolist()
 
-                if print_config["l1_output"]:
-                    print_l1_output(minibatch_index)
+                    
 
-                if print_config["l2_output"]:
-                    print_l2_output(minibatch_index)
-
-                if print_config["dropout_l2_output"]:
-                    print_dropout_l2_output(minibatch_index)
-
-                if print_config["l3_output"]:
-                    print_l3_output(minibatch_index)
-
-
-            if (iter + 1) % validation_frequency == 0:
-                if print_config["param_weight_mean"]:
-                    print_param_weight_mean()
-
-                if print_config["adadelta_lr_mean"]:
-                    print_adadelta_lr_mean()
-
-                if print_config["adagrad_lr_mean"]:
-                    print_adagrad_lr_mean()
-
-                if print_config["grad_abs_mean"]:
-                    print_grads()
+                # print_grads(minibatch_index)
+                # print_learning_rates()
+                # print_embeddings()
+                # print_logreg_param()
                 
-                if print_config["logreg_W"]:
-                    print_logreg_W()
+                # iteration number
+                iter = (epoch - 1) * n_train_batches + minibatch_index
 
-                if print_config["logreg_b"]:
-                    print_logreg_b()
+                if (minibatch_index+1) % 50 == 0 or minibatch_index == n_train_batches - 1:
+                    print "%d / %d minibatches completed" %(minibatch_index + 1, n_train_batches)                
+                    if print_config["nnl"]:
+                        print "`nnl` for the past 50 minibatches is %f" %(np.mean(np.array(nnls)))
+                        nnls = []
+                    if print_config["L2_sqr"]:
+                        print "`L2_sqr`` for the past 50 minibatches is %f" %(np.mean(np.array(L2_sqrs)))
+                        L2_sqrs = []                                    
 
-                print "At epoch %d and minibatch %d. \nTrain error %.2f%%\nDev error %.2f%%\n" %(
-                    epoch, 
-                    minibatch_index,
-                    train_error() * 100, 
-                    valid_error() * 100
-                )
+                    if print_config["conv_layer1_W"]:
+                        print_convlayer1_W()
+
+                    if print_config["conv_layer2_W"]:
+                        print_convlayer2_W()
+
+                    if print_config["p_y_given_x"]:
+                        print_p_y_given_x(minibatch_index)
+
+                    if print_config["l1_output"]:
+                        print_l1_output(minibatch_index)
+
+                    if print_config["l2_output"]:
+                        print_l2_output(minibatch_index)
+
+                    if print_config["dropout_l2_output"]:
+                        print_dropout_l2_output(minibatch_index)
+
+                    if print_config["l3_output"]:
+                        print_l3_output(minibatch_index)
+
+
+                if (iter + 1) % validation_frequency == 0:
+                    if print_config["param_weight_mean"]:
+                        print_param_weight_mean()
+
+                    if print_config["adadelta_lr_mean"]:
+                        print_adadelta_lr_mean()
+
+                    if print_config["adagrad_lr_mean"]:
+                        print_adagrad_lr_mean()
+
+                    if print_config["grad_abs_mean"]:
+                        print_grads()
+                    
+                    if print_config["logreg_W"]:
+                        print_logreg_W()
+
+                    if print_config["logreg_b"]:
+                        print_logreg_b()
+
+                    print "At epoch %d and minibatch %d. \nTrain error %.2f%%\nDev error %.2f%%\n" %(
+                        epoch, 
+                        minibatch_index,
+                        train_error() * 100, 
+                        valid_error() * 100
+                    )
+    except KeyboardInterrupt:
+        from plot_util import plot_hist, plot_track, plt
+        if print_config["activation_tracking"]:
+            plot_track(activation_means, 
+                          activation_stds, 
+                          "activation_tracking")
+
+        if print_config["weight_grad_tracking"]:
+            plot_track(weight_grad_means, 
+                          weight_grad_stds,
+                          "weight_grad_tracking")
+            
+        if print_config["activation_hist"]:        
+            plot_hist(activation_hist_data, "activation_hist")
+
+        if print_config["weight_grad_hist"]:
+            print len(weight_grad_hist_data[0]), len(weight_grad_hist_data[1])
+            print weight_grad_hist_data[0][:10], weight_grad_hist_data[1][:10]
+            plot_hist(weight_grad_hist_data, "weight_grad_hist")
+
+        plt.show()
     
     end_time = time.clock()
     print(('Optimization complete. Best validation score of %f %% '
@@ -819,22 +952,33 @@ if __name__ == "__main__":
     print_config = {
         "adadelta_lr_mean": 0,
         "adagrad_lr_mean": 0,
+        
         "logreg_W": 0,
         "logreg_b": 0,
+        
         "conv_layer1_W": 0,
         "conv_layer2_W": 0,
+        
+        "activation_tracking": 1, # the activation value, mean and variance
+        "weight_grad_tracking": 1, # the weight gradient tracking
+        "backprop_grad_tracking": 0, # the backpropagated gradient, mean and variance. In this case, grad propagated from layer 2 to layer 1
+        "activation_hist": 1, # the activation value, mean and variance
+        "weight_grad_hist": 1, # the weight gradient tracking
+        "backprop_grad_hist": 1,
+        
         "l1_output": 0,
-        "l2_output": 0,
+        "l2_output": 0,        
         "dropout_l2_output": 0,
         "l3_output": 0,
-        "p_y_given_x": 1,
+        "p_y_given_x": 0,
         "embeddings": 0,
         "grad_abs_mean": 0,
-        "nnl": 1,
-        "L2_sqr": 1,
+        "nnl": 0,
+        "L2_sqr": 0,
         "param_weight_mean": 0,
     }
     
+
     train_and_test(
         lr_update_method = None,
         use_L2_reg = True, 
@@ -848,3 +992,4 @@ if __name__ == "__main__":
         dropout_switches = [False, False, False], 
         dropout_rates = [0.2, 0.5, 0.5]
     )
+        
