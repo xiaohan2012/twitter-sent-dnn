@@ -29,22 +29,14 @@ class WordEmbeddingLayer(object):
 
         embed_dm: integer, the dimension of word vector representation
         """                
-        # # Note:
-        # # assume the padding is the last row
-        # # and it's constant to 0
-        # pad_val = np.zeros((1, embed_dm))
-        
-        # embed_val = np.concatenate((embed_val_except_pad, pad_val), 
-        #                            axis = 0)
-        
-        embedding_val = np.asarray(
-            rng.normal(0, 0.05, (vocab_size, embed_dm)), 
-            dtype = theano.config.floatX
-        )
         # embedding_val = np.asarray(
-        #     rng.uniform(low = 0, high = 0.5, size = (vocab_size, embed_dm)), 
+        #     rng.normal(0, 0.05, (vocab_size, embed_dm)), 
         #     dtype = theano.config.floatX
         # )
+        embedding_val = np.asarray(
+            rng.uniform(low = -0.5, high = 0.5, size = (vocab_size, embed_dm)), 
+            dtype = theano.config.floatX
+        )
         
         embedding_val[vocab_size-1,:] = 0 # the <PAD> character is intialized to 0
         
@@ -82,6 +74,7 @@ class ConvFoldingPoolLayer(object):
                  k,
                  activation,
                  fan_in_fan_out = True,
+                 fold = 0,
                  W = None,
                  b = None):
         """
@@ -102,6 +95,9 @@ class ConvFoldingPoolLayer(object):
            whether use fan-in fan-out initialization or not. Default, True
            If not True, use `normal(0, 0.05, size)`
 
+        fold: int, 0 or 1
+           fold or not
+
         W: theano.tensor.tensor4,
            the filter weight matrices, 
            dimension: (number of filters, num input feature maps, filter height, filter width)
@@ -115,6 +111,7 @@ class ConvFoldingPoolLayer(object):
         self.input = input
         self.k = k
         self.filter_shape = filter_shape
+        self.fold = fold
 
         assert activation in ('tanh', 'relu', 'sigmoid')
         self.activation = activation
@@ -209,14 +206,18 @@ class ConvFoldingPoolLayer(object):
                                       self.W, 
                                       border_mode = "full")             
 
-        # fold
-        fold_out = self.fold(conv_out)
+        if self.fold:
+            # fold
+            fold_out = self.fold(conv_out)
+        else:
+            fold_out = conv_out
 
         # k-max pool        
         pool_out = (self.k_max_pool(fold_out, self.k) + 
                     self.b.dimshuffle('x', 0, 'x', 'x'))
         
-        # pool_out = theano.printing.Print("pool_out")(pool_out)
+        # pool_out = theano.printing.Print("pool_out, self.k: %d" %self.k)(pool_out)
+        
         # around 0.
         # why tanh becomes extreme?
         
@@ -248,6 +249,7 @@ class DropoutLayer(object):
         self.output = input * T.cast(mask, theano.config.floatX)
 
 def train_and_test(
+        fold_flags = [1,1],
         lr_update_method = "adadelta",
         use_L2_reg = True,
         learning_rate = 0.1,
@@ -273,7 +275,7 @@ def train_and_test(
     if lr_update_method:
         assert lr_update_method in ("adadelta", "adagrad")
 
-    assert conv_layer_n == len(conv_sizes) == len(nkerns) == (len(L2_regs) - 2)
+    assert conv_layer_n == len(conv_sizes) == len(nkerns) == (len(L2_regs) - 2) == len(fold_flags)
 
     ###################
     # get the data    #
@@ -318,6 +320,7 @@ def train_and_test(
     layers = [layer1]
     
     for i in xrange(conv_layer_n):
+        fold_flag = fold_flags[i]
         
         # for the dropout layer
         dpl = DropoutLayer(
@@ -339,13 +342,14 @@ def train_and_test(
         k = int(max(k_top, 
                     math.ceil((conv_layer_n - float(i+1)) / conv_layer_n * train_sent_len)))
         
-        print "For conv layer(%s) %d, filter shape = %r, k = %d, dropout_rate = %f and fan_in_fan_out: %r" %(
+        print "For conv layer(%s) %d, filter shape = %r, k = %d, dropout_rate = %f and fan_in_fan_out: %r and fold: %d" %(
             conv_activation_unit, 
             i+2, 
             filter_shape, 
             k, 
             dropout_rates[i], 
-            fan_in_fan_out
+            fan_in_fan_out, 
+            fold_flag
         )
         
         # we have two layers adding to two paths repsectively, 
@@ -357,6 +361,7 @@ def train_and_test(
                                                   filter_shape = filter_shape, 
                                                   k = k, 
                                                   fan_in_fan_out = fan_in_fan_out,
+                                                  fold = fold_flag,
                                                   activation = conv_activation_unit)
     
         # for prediction
@@ -366,6 +371,7 @@ def train_and_test(
                                           filter_shape = filter_shape,
                                           k = k,
                                           activation = conv_activation_unit,
+                                          fold = fold_flag,
                                           W = dropout_conv_layer.W * (1 - dropout_rates[i]), # model averaging
                                           b = dropout_conv_layer.b
         )
@@ -375,7 +381,11 @@ def train_and_test(
     
     # last, the output layer
     # both dropout and without dropout
-    n_in = nkerns[-1] * k_top * embed_dm / (len(nkerns)*2)
+    if sum(fold_flags) > 0:
+        n_in = nkerns[-1] * k_top * embed_dm / (sum(fold_flags)*2)
+    else:
+        n_in = nkerns[-1] * k_top * embed_dm
+        
     print "For output layer, n_in = %d, dropout_rate = %f" %(n_in, dropout_rates[-1])
     
     dropout_output_layer = LogisticRegression(
@@ -744,6 +754,14 @@ def train_and_test(
             outputs = theano.printing.Print("l1_output")(layers[0].output),
             givens = train_data_at_index
         )
+
+
+    if print_config["dropout_l1_output"]:
+        print_dropout_l1_output = theano.function(
+            inputs = [batch_index],
+            outputs = theano.printing.Print("dropout_l1_output")(dropout_layers[0].output),
+            givens = train_data_at_index
+        )
         
     if print_config["l2_output"]:
         print_l2_output = theano.function(
@@ -851,9 +869,7 @@ def train_and_test(
                 if print_config["weight_grad_hist"]:
                     for layer_hist, layer_data in zip(weight_grad_hist_data , get_weight_grads(minibatch_index)):
                         layer_hist += layer_data.tolist()
-
-                    
-
+                
                 # print_grads(minibatch_index)
                 # print_learning_rates()
                 # print_embeddings()
@@ -886,12 +902,14 @@ def train_and_test(
                     if print_config["l2_output"]:
                         print_l2_output(minibatch_index)
 
+                    if print_config["dropout_l1_output"]:
+                        print_dropout_l1_output(minibatch_index)
+
                     if print_config["dropout_l2_output"]:
                         print_dropout_l2_output(minibatch_index)
 
                     if print_config["l3_output"]:
                         print_l3_output(minibatch_index)
-
 
                 if (iter + 1) % validation_frequency == 0:
                     if print_config["param_weight_mean"]:
@@ -959,16 +977,18 @@ if __name__ == "__main__":
         "conv_layer1_W": 0,
         "conv_layer2_W": 0,
         
-        "activation_tracking": 1, # the activation value, mean and variance
-        "weight_grad_tracking": 1, # the weight gradient tracking
+        "activation_tracking": 0, # the activation value, mean and variance
+        "weight_grad_tracking": 0, # the weight gradient tracking
         "backprop_grad_tracking": 0, # the backpropagated gradient, mean and variance. In this case, grad propagated from layer 2 to layer 1
-        "activation_hist": 1, # the activation value, mean and variance
-        "weight_grad_hist": 1, # the weight gradient tracking
-        "backprop_grad_hist": 1,
+        "activation_hist": 0, # the activation value, mean and variance
+        "weight_grad_hist": 0, # the weight gradient tracking
+        "backprop_grad_hist": 0,
         
         "l1_output": 0,
+        "dropout_l1_output": 0,
         "l2_output": 0,        
         "dropout_l2_output": 0,
+
         "l3_output": 0,
         "p_y_given_x": 0,
         "embeddings": 0,
@@ -980,6 +1000,7 @@ if __name__ == "__main__":
     
 
     train_and_test(
+        fold_flags =  [0, 0],
         lr_update_method = None,
         use_L2_reg = True, 
         L2_regs= [0.00001, 0.0003, 0.0003, 0.0001],
@@ -990,6 +1011,6 @@ if __name__ == "__main__":
         batch_size = 10, 
         print_config = print_config, 
         dropout_switches = [False, False, False], 
-        dropout_rates = [0.2, 0.5, 0.5]
+        dropout_rates = [0.5, 0.5, 0.5]
     )
         
