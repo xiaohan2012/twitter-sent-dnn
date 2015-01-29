@@ -23,8 +23,7 @@ Please refer to [A Convolutional Neural Network for Modelling Sentences](http://
 
 ## Training techniques
 
-1. Orthogonization
-2. Fan-in, fan-out initialization
-3. dropout
-4. learning rate decay
+1. Fan-in, fan-out initialization
+2. Dropout
+3. AdaDelta
 

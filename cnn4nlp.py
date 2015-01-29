@@ -11,9 +11,8 @@ import theano
 import theano.tensor as T
 import util
 
-THEANO_COMPILE_MODE = "FAST_RUN"
-
 from logreg import LogisticRegression
+
 class WordEmbeddingLayer(object):
     """
     Layer that takes input vectors, output the sentence matrix
@@ -35,7 +34,7 @@ class WordEmbeddingLayer(object):
         pretrained embeddings
         """                
         if embeddings:
-            print "use pretrained embeddings"
+            print "Use pretrained embeddings: ON"
             assert embeddings.get_value().shape == (vocab_size, embed_dm), "%r != %r" %(
                 embeddings.get_value().shape, 
                 (vocab_size, embed_dm)
@@ -43,6 +42,7 @@ class WordEmbeddingLayer(object):
             
             self.embeddings = embeddings
         else:
+            print "Use pretrained embeddings: OFF"
             embedding_val = np.asarray(
                 rng.uniform(low = -0.5, high = 0.5, size = (vocab_size, embed_dm)), 
                 dtype = theano.config.floatX
@@ -83,7 +83,7 @@ class ConvFoldingPoolLayer(object):
                  filter_shape,
                  k,
                  activation,
-                 fan_in_fan_out = True,
+                 norm_w = True,
                  fold = 0,
                  W = None,
                  b = None):
@@ -101,7 +101,7 @@ class ConvFoldingPoolLayer(object):
         activation: str
            the activation unit type, `tanh` or `relu` or 'sigmoid'
 
-        fan_in_fan_out: bool
+        norm_w: bool
            whether use fan-in fan-out initialization or not. Default, True
            If not True, use `normal(0, 0.05, size)`
 
@@ -121,7 +121,7 @@ class ConvFoldingPoolLayer(object):
         self.input = input
         self.k = k
         self.filter_shape = filter_shape
-        self.fold = fold
+        self.fold_flag = fold
 
         assert activation in ('tanh', 'relu', 'sigmoid')
         self.activation = activation
@@ -129,7 +129,7 @@ class ConvFoldingPoolLayer(object):
         if W is not None:
             self.W = W
         else:
-            if fan_in_fan_out:
+            if norm_w:
                 # use fan-in fan-out init
                 fan_in = np.prod(filter_shape[1:])
                 
@@ -216,7 +216,7 @@ class ConvFoldingPoolLayer(object):
                                       self.W, 
                                       border_mode = "full")             
 
-        if self.fold:
+        if self.fold_flag:
             # fold
             fold_out = self.fold(conv_out)
         else:
@@ -258,33 +258,9 @@ class DropoutLayer(object):
 
         self.output = input * T.cast(mask, theano.config.floatX)
 
-def train_and_test(
-        use_pretrained_embedding = False,
-        fold_flags = [1,1],
-        use_L2_reg = True,
-        learning_rate = 0.1,
-        fan_in_fan_out = True,
-        delay_embedding_learning = True,
-        embedding_learning_delay_epochs = 10,
-        conv_activation_unit = "tanh", 
-        epsilon = 0.000001,
-        rho = 0.95,
-        gamma = 0.1,
-        embed_dm = 48,        
-        ks = [15, 6],
-        L2_regs= [0.00001, 0.0003, 0.0003, 0.0001],
-        n_hidden = 500,
-        batch_size = 500,
-        n_epochs = 200, 
-        dropout_switches = [True, True, True], 
-        dropout_rates = [0.2, 0.5, 0.5],
-        conv_layer_n = 2,
-        nkerns = [6, 12],
-        conv_sizes = [10, 7],
-        print_config = {}
-):
+def train_and_test(args, print_config):
 
-    assert conv_layer_n == len(conv_sizes) == len(nkerns) == (len(L2_regs) - 2) == len(fold_flags) == len(ks)
+    assert args.conv_layer_n == len(args.filter_widths) == len(args.nkerns) == (len(args.L2_regs) - 2) == len(args.fold_flags) == len(args.ks)
 
     ###################
     # get the data    #
@@ -293,12 +269,12 @@ def train_and_test(
                                        corpus_folder = 'data/stanfordSentimentTreebank/trees/')
     
     train_set_x, train_set_y = datasets[0]
-    valid_set_x, valid_set_y = datasets[1]
+    dev_set_x, dev_set_y = datasets[1]
     test_set_x, test_set_y = datasets[2]
     word2index = datasets[3]
     index2word = datasets[4]
 
-    n_train_batches = train_set_x.get_value(borrow=True).shape[0] / batch_size
+    n_train_batches = train_set_x.get_value(borrow=True).shape[0] / args.batch_size
     train_sent_len = train_set_x.get_value(borrow=True).shape[1]
     possible_labels =  set(train_set_y.get_value().tolist())
     
@@ -329,50 +305,51 @@ def train_and_test(
     ###############################
     # Construction of the network #
     ###############################
-
     # Layer 1, the embedding layer
     layer1 = WordEmbeddingLayer(rng, 
                                 input = x, 
                                 vocab_size = len(word2index), 
-                                embed_dm = embed_dm, 
+                                embed_dm = args.embed_dm, 
                                 embeddings = (
                                     pretrained_embeddings 
-                                    if use_pretrained_embedding else None))
+                                    if args.use_pretrained_embedding else None
+                                )
+    )
     
     dropout_layers = [layer1]
     layers = [layer1]
     
-    for i in xrange(conv_layer_n):
-        fold_flag = fold_flags[i]
+    for i in xrange(args.conv_layer_n):
+        fold_flag = args.fold_flags[i]
         
         # for the dropout layer
         dpl = DropoutLayer(
             input = dropout_layers[-1].output,
             rng = rng, 
-            dropout_rate = dropout_rates[0]
+            dropout_rate = args.dropout_rates[0]
         ) 
         next_layer_dropout_input = dpl.output
         next_layer_input = layers[-1].output
         
         # for the conv layer
         filter_shape = (
-            nkerns[i],
-            (1 if i == 0 else nkerns[i-1]), 
+            args.nkerns[i],
+            (1 if i == 0 else args.nkerns[i-1]), 
             1, 
-            conv_sizes[i]
+            args.filter_widths[i]
         )
         
-        k = ks[i]
+        k = args.ks[i]
         # k = int(max(k_top, 
         #             math.ceil((conv_layer_n - float(i+1)) / conv_layer_n * train_sent_len)))
         
-        print "For conv layer(%s) %d, filter shape = %r, k = %d, dropout_rate = %f and fan_in_fan_out: %r and fold: %d" %(
-            conv_activation_unit, 
+        print "For conv layer(%s) %d, filter shape = %r, k = %d, dropout_rate = %f and normalized weight init: %r and fold: %d" %(
+            args.conv_activation_unit, 
             i+2, 
             filter_shape, 
             k, 
-            dropout_rates[i], 
-            fan_in_fan_out, 
+            args.dropout_rates[i], 
+            args.norm_w, 
             fold_flag
         )
         
@@ -384,9 +361,9 @@ def train_and_test(
                                                   input = next_layer_dropout_input,
                                                   filter_shape = filter_shape, 
                                                   k = k, 
-                                                  fan_in_fan_out = fan_in_fan_out,
+                                                  norm_w = args.norm_w,
                                                   fold = fold_flag,
-                                                  activation = conv_activation_unit)
+                                                  activation = args.conv_activation_unit)
     
         # for prediction
         # sharing weight with dropout layer
@@ -394,9 +371,9 @@ def train_and_test(
                                           input = next_layer_input,
                                           filter_shape = filter_shape,
                                           k = k,
-                                          activation = conv_activation_unit,
+                                          activation = args.conv_activation_unit,
                                           fold = fold_flag,
-                                          W = dropout_conv_layer.W * (1 - dropout_rates[i]), # model averaging
+                                          W = dropout_conv_layer.W * (1 - args.dropout_rates[i]), # model averaging
                                           b = dropout_conv_layer.b
         )
 
@@ -405,12 +382,12 @@ def train_and_test(
     
     # last, the output layer
     # both dropout and without dropout
-    if sum(fold_flags) > 0:
-        n_in = nkerns[-1] * ks[-1] * embed_dm / (sum(fold_flags)*2)
+    if sum(args.fold_flags) > 0:
+        n_in = args.nkerns[-1] * args.ks[-1] * args.embed_dm / (sum(args.fold_flags)*2)
     else:
-        n_in = nkerns[-1] * ks[-1] * embed_dm
+        n_in = args.nkerns[-1] * args.ks[-1] * args.embed_dm
         
-    print "For output layer, n_in = %d, dropout_rate = %f" %(n_in, dropout_rates[-1])
+    print "For output layer, n_in = %d, dropout_rate = %f" %(n_in, args.dropout_rates[-1])
     
     dropout_output_layer = LogisticRegression(
         rng,
@@ -424,7 +401,7 @@ def train_and_test(
         input = layers[-1].output.flatten(2), 
         n_in = n_in,
         n_out = len(possible_labels),
-        W = dropout_output_layer.W * (1 - dropout_rates[-1]), # sharing the parameters, don't forget
+        W = dropout_output_layer.W * (1 - args.dropout_rates[-1]), # sharing the parameters, don't forget
         b = dropout_output_layer.b
     )
     
@@ -438,15 +415,16 @@ def train_and_test(
     dropout_cost = dropout_output_layer.nnl(y)
     errors = output_layer.errors(y)
     
-    def get_L2_sqr(param_layers):
+    def prepare_L2_sqr(param_layers, L2_regs):
+        assert len(L2_regs) == len(param_layers)
         return T.sum([
             L2_reg / 2 * ((layer.W if hasattr(layer, "W") else layer.embeddings) ** 2).sum()
             for L2_reg, layer in zip(L2_regs, param_layers)
         ])
-    L2_sqr = get_L2_sqr(dropout_layers)
-    L2_sqr_no_ebd = get_L2_sqr(dropout_layers[1:])
+    L2_sqr = prepare_L2_sqr(dropout_layers, args.L2_regs)
+    L2_sqr_no_ebd = prepare_L2_sqr(dropout_layers[1:], args.L2_regs[1:])
     
-    if use_L2_reg:
+    if args.use_L2_reg:
         cost = dropout_cost + L2_sqr
         cost_no_ebd = dropout_cost + L2_sqr_no_ebd
     else:
@@ -455,11 +433,7 @@ def train_and_test(
     ###############################
     # Parameters to be used       #
     ###############################
-    if not delay_embedding_learning:
-        print "Immediate embedding learning. "
-        embedding_learning_delay_epochs = 0        
-    else:
-        print "Delay embedding learning by %d epochs" %(embedding_learning_delay_epochs)
+    print "Delay embedding learning by %d epochs" %(args.embedding_learning_delay_epochs)
         
     print "param_layers: %r" %dropout_layers
     param_layers = dropout_layers
@@ -467,7 +441,7 @@ def train_and_test(
     ##############################
     # Parameter Update           #
     ##############################
-    print "Using AdaDelta with rho = %f and epsilon = %f" %(rho, epsilon)
+    print "Using AdaDelta with rho = %f and epsilon = %f" %(args.rho, args.epsilon)
     
     params = [param for layer in param_layers for param in layer.params]
     param_shapes=  [param for layer in param_layers for param in layer.param_shapes]                                
@@ -501,17 +475,17 @@ def train_and_test(
     ]        
     
     new_egs = [
-        rho * eg + (1 - rho) * g ** 2
+        args.rho * eg + (1 - args.rho) * g ** 2
         for eg, g in zip(egs, param_grads)
     ]
         
     delta_x = [
-        -(T.sqrt(ex + epsilon) / T.sqrt(new_eg + epsilon)) * g
+        -(T.sqrt(ex + args.epsilon) / T.sqrt(new_eg + args.epsilon)) * g
         for new_eg, ex, g in zip(new_egs, exs, param_grads)
     ]    
     
     new_exs = [
-        rho * ex + (1 - rho) * (dx ** 2)
+        args.rho * ex + (1 - args.rho) * (dx ** 2)
         for ex, dx in zip(exs, delta_x)
     ]    
     
@@ -523,10 +497,9 @@ def train_and_test(
     ]
 
     updates = egs_updates + exs_updates + param_updates
-    print "updates:\n", updates
     
-    # updates without embedding
-    # exclude the first parameter
+    # updates WITHOUT embedding
+    # exclude the embedding parameter
     egs_updates_no_ebd = zip(egs[1:], new_egs[1:])
     exs_updates_no_ebd = zip(exs[1:], new_exs[1:])
     param_updates_no_ebd = [
@@ -535,15 +508,13 @@ def train_and_test(
     ]
     updates_no_emb = egs_updates_no_ebd + exs_updates_no_ebd + param_updates_no_ebd
     
-    print "updates_no_emb:\n", updates_no_emb
-    
     def make_train_func(cost, updates):
         return theano.function(inputs = [batch_index],
                                outputs = [cost], 
                                updates = updates,
                                givens = {
-                                   x: train_set_x[batch_index * batch_size: (batch_index + 1) * batch_size],
-                                   y: train_set_y[batch_index * batch_size: (batch_index + 1) * batch_size]
+                                   x: train_set_x[batch_index * args.batch_size: (batch_index + 1) * args.batch_size],
+                                   y: train_set_y[batch_index * args.batch_size: (batch_index + 1) * args.batch_size]
                                },
         )        
 
@@ -561,7 +532,9 @@ def train_and_test(
         
     train_error = make_error_func(train_set_x, train_set_y)
 
-    valid_error = make_error_func(valid_set_x, valid_set_y)
+    dev_error = make_error_func(dev_set_x, dev_set_y)
+
+    test_error = make_error_func(test_set_x, test_set_y)
     
 
     #############################
@@ -571,12 +544,12 @@ def train_and_test(
     # some demonstration of the gradient vanishing probelm
     
     train_data_at_index = {
-        x: train_set_x[batch_index * batch_size: (batch_index + 1) * batch_size],
+        x: train_set_x[batch_index * args.batch_size: (batch_index + 1) * args.batch_size],
     }
 
     train_data_at_index_with_y = {
-        x: train_set_x[batch_index * batch_size: (batch_index + 1) * batch_size],
-        y: train_set_y[batch_index * batch_size: (batch_index + 1) * batch_size]
+        x: train_set_x[batch_index * args.batch_size: (batch_index + 1) * args.batch_size],
+        y: train_set_y[batch_index * args.batch_size: (batch_index + 1) * args.batch_size]
     }
 
     if print_config["nnl"]:
@@ -584,8 +557,8 @@ def train_and_test(
             inputs = [batch_index],
             outputs = dropout_cost,
             givens = {
-                x: train_set_x[batch_index * batch_size: (batch_index + 1) * batch_size],
-                y: train_set_y[batch_index * batch_size: (batch_index + 1) * batch_size]
+                x: train_set_x[batch_index * args.batch_size: (batch_index + 1) * args.batch_size],
+                y: train_set_y[batch_index * args.batch_size: (batch_index + 1) * args.batch_size]
             }
         )
         
@@ -593,6 +566,11 @@ def train_and_test(
         get_L2_sqr = theano.function(
             inputs = [],
             outputs = L2_sqr
+        )
+
+        get_L2_sqr_no_ebd = theano.function(
+            inputs = [],
+            outputs = L2_sqr_no_ebd
         )
         
     if print_config["grad_abs_mean"]:
@@ -790,7 +768,7 @@ def train_and_test(
 
     
     #the training loop
-    patience = 10000  # look as this many examples regardless
+    patience = 500  # look as this many examples regardless
     patience_increase = 2  # wait this much longer when a new best is
                                   # found
     improvement_threshold = 0.995  # a relative improvement of this much is
@@ -808,18 +786,22 @@ def train_and_test(
     nnls = []
     L2_sqrs = []
     
-    activation_means = [[] for i in xrange(conv_layer_n)]
-    activation_stds = [[] for i in xrange(conv_layer_n)]
-    weight_grad_means = [[] for i in xrange(conv_layer_n)]
-    weight_grad_stds = [[] for i in xrange(conv_layer_n)]
-    activation_hist_data = [[] for i in xrange(conv_layer_n)]
-    weight_grad_hist_data = [[] for i in xrange(conv_layer_n)]
+    activation_means = [[] for i in xrange(args.conv_layer_n)]
+    activation_stds = [[] for i in xrange(args.conv_layer_n)]
+    weight_grad_means = [[] for i in xrange(args.conv_layer_n)]
+    weight_grad_stds = [[] for i in xrange(args.conv_layer_n)]
+    activation_hist_data = [[] for i in xrange(args.conv_layer_n)]
+    weight_grad_hist_data = [[] for i in xrange(args.conv_layer_n)]
+
+    train_errors = []
+    dev_errors = []
     try:
-        while (epoch < n_epochs) and (not done_looping):
+        print "validation_frequency = %d" %validation_frequency
+        while (epoch < args.n_epochs) and (not done_looping):
             epoch += 1
             print "At epoch {0}".format(epoch)
 
-            if epoch == (embedding_learning_delay_epochs + 1):
+            if epoch == (args.embedding_learning_delay_epochs + 1):
                 print "########################"
                 print "Start training embedding"
                 print "########################"
@@ -833,18 +815,50 @@ def train_and_test(
             train_set_x.set_value(train_set_x_data[permutation])
             train_set_y.set_value(train_set_y_data[permutation])
             for minibatch_index in xrange(n_train_batches):
-                if epoch >= (embedding_learning_delay_epochs + 1):
+                if epoch >= (args.embedding_learning_delay_epochs + 1):
                     train_cost = train_model(minibatch_index)
                 else:
                     train_cost = train_model_no_ebd(minibatch_index)
 
+
+                iter = (epoch - 1) * n_train_batches + minibatch_index
+                
+                if (iter + 1) % validation_frequency == 0:
+                    train_error_val = train_error()
+                    dev_error_val = dev_error()
+                    
+                    print "At epoch %d and minibatch %d. \nTrain error %.2f%%\nDev error %.2f%%\n" %(
+                        epoch, 
+                        minibatch_index,
+                        train_error_val * 100, 
+                        dev_error_val * 100
+                    )
+                    
+                    train_errors.append(train_error_val)
+                    dev_errors.append(dev_error_val)
+
+                if (minibatch_index+1) % 50 == 0 or minibatch_index == n_train_batches - 1:
+                    print "%d / %d minibatches completed" %(minibatch_index + 1, n_train_batches)                
+                    if print_config["nnl"]:
+                        print "`nnl` for the past 50 minibatches is %f" %(np.mean(np.array(nnls)))
+                        nnls = []
+                    if print_config["L2_sqr"]:
+                        print "`L2_sqr`` for the past 50 minibatches is %f" %(np.mean(np.array(L2_sqrs)))
+                        L2_sqrs = []                                                                            
+
+                ##################
+                # Plotting stuff #
+                ##################
                 if print_config["nnl"]:
                     nnl = get_nnl(minibatch_index)
                     # print "nll for batch %d: %f" %(minibatch_index, nnl)
                     nnls.append(nnl)
                     
                 if print_config["L2_sqr"]:
-                    L2_sqrs.append(get_L2_sqr())            
+                    if epoch >= (args.embedding_learning_delay_epochs + 1):
+                        L2_sqrs.append(get_L2_sqr())
+                    else:
+                        L2_sqrs.append(get_L2_sqr_no_ebd())
                     
                 if print_config["activation_tracking"]:
                     layer_means = get_activation_mean(minibatch_index)
@@ -868,78 +882,13 @@ def train_and_test(
                 if print_config["weight_grad_hist"]:
                     for layer_hist, layer_data in zip(weight_grad_hist_data , get_weight_grads(minibatch_index)):
                         layer_hist += layer_data.tolist()
-                
-                # print_grads(minibatch_index)
-                # print_learning_rates()
-
-                if print_config["embeddings"]:
-                    print_embeddings()
-
-                # print_logreg_param()
-                
-                # iteration number
-                iter = (epoch - 1) * n_train_batches + minibatch_index
-
-                if (minibatch_index+1) % 50 == 0 or minibatch_index == n_train_batches - 1:
-                    print "%d / %d minibatches completed" %(minibatch_index + 1, n_train_batches)                
-                    if print_config["nnl"]:
-                        print "`nnl` for the past 50 minibatches is %f" %(np.mean(np.array(nnls)))
-                        nnls = []
-                    if print_config["L2_sqr"]:
-                        print "`L2_sqr`` for the past 50 minibatches is %f" %(np.mean(np.array(L2_sqrs)))
-                        L2_sqrs = []                                    
-
-                    if print_config["conv_layer1_W"]:
-                        print_convlayer1_W()
-
-                    if print_config["conv_layer2_W"]:
-                        print_convlayer2_W()
-
-                    if print_config["p_y_given_x"]:
-                        print_p_y_given_x(minibatch_index)
-
-                    if print_config["l1_output"]:
-                        print_l1_output(minibatch_index)
-
-                    if print_config["l2_output"]:
-                        print_l2_output(minibatch_index)
-
-                    if print_config["dropout_l1_output"]:
-                        print_dropout_l1_output(minibatch_index)
-
-                    if print_config["dropout_l2_output"]:
-                        print_dropout_l2_output(minibatch_index)
-
-                    if print_config["l3_output"]:
-                        print_l3_output(minibatch_index)
-
-                if (iter + 1) % validation_frequency == 0:
-                    if print_config["param_weight_mean"]:
-                        print_param_weight_mean()
-
-                    if print_config["adadelta_lr_mean"]:
-                        print_adadelta_lr_mean()
-
-                    if print_config["adagrad_lr_mean"]:
-                        print_adagrad_lr_mean()
-
-                    if print_config["grad_abs_mean"]:
-                        print_grads()
-                    
-                    if print_config["logreg_W"]:
-                        print_logreg_W()
-
-                    if print_config["logreg_b"]:
-                        print_logreg_b()
-
-                    print "At epoch %d and minibatch %d. \nTrain error %.2f%%\nDev error %.2f%%\n" %(
-                        epoch, 
-                        minibatch_index,
-                        train_error() * 100, 
-                        valid_error() * 100
-                    )
+                                    
     except KeyboardInterrupt:
-        from plot_util import plot_hist, plot_track, plt
+        from plot_util import (plot_hist, 
+                               plot_track, 
+                               plot_error_vs_epoch, 
+                               plt)
+
         if print_config["activation_tracking"]:
             plot_track(activation_means, 
                           activation_stds, 
@@ -954,13 +903,20 @@ def train_and_test(
             plot_hist(activation_hist_data, "activation_hist")
 
         if print_config["weight_grad_hist"]:
-            print len(weight_grad_hist_data[0]), len(weight_grad_hist_data[1])
-            print weight_grad_hist_data[0][:10], weight_grad_hist_data[1][:10]
             plot_hist(weight_grad_hist_data, "weight_grad_hist")
 
-        plt.show()
+        if print_config["error_vs_epoch"]:
+            ax = plot_error_vs_epoch(train_errors, dev_errors)
+    
+        if not  args.img_prefix:
+            plt.show()
+        else:
+            plt.savefig("plots/" + args.img_prefix + ".pdf")
     
     end_time = time.clock()
+    test_score = test_error()
+    print "test score %f" %(test_score * 100.)
+
     print(('Optimization complete. Best validation score of %f %% '
            'obtained at iteration %i, with test performance %f %%') %
           (best_validation_loss * 100., best_iter + 1, test_score * 100.))
@@ -986,6 +942,7 @@ if __name__ == "__main__":
         "activation_hist": 0, # the activation value, mean and variance
         "weight_grad_hist": 0, # the weight gradient tracking
         "backprop_grad_hist": 0,
+        "error_vs_epoch": 1,
         
         "l1_output": 0,
         "dropout_l1_output": 0,
@@ -1001,20 +958,84 @@ if __name__ == "__main__":
         "param_weight_mean": 0,
     }
     
+    import argparse, sys
 
-    train_and_test(
-        use_pretrained_embedding = True,
-        fold_flags =  [0, 0],
-        use_L2_reg = True, 
-        L2_regs= np.array([0.00001, 0.0003, 0.0003, 0.0001]) * 10,
-        fan_in_fan_out = True,
-        delay_embedding_learning = True,
-        embedding_learning_delay_epochs = 4,
-        conv_activation_unit = "tanh", 
-        learning_rate = 0.0001, 
-        batch_size = 10, 
-        print_config = print_config, 
-        dropout_switches = [False, False, False], 
-        dropout_rates = [0.5, 0.5, 0.5]
+    parser = argparse.ArgumentParser(description = "CNN with k-max pooling for sentence classification")
+    parser.add_argument("--ext_ebd", type = bool, default = False,
+                        dest = "use_pretrained_embedding", 
+                        help = "Use external/pretrained word embedding or not"
+    )
+    parser.add_argument("--fold", type=int, default = [1,1], nargs="+",
+                        dest = "fold_flags", 
+                        help = "Flags that turn on/off folding"
+    )
+    parser.add_argument("--l2", type=bool, default = True,
+                        dest = "use_L2_reg", 
+                        help = "Use L2 regularization or not"
+    )
+    parser.add_argument("--lr", type=float, default = float, 
+                        dest = "learning_rate", 
+                        help = "Learning rate if constant learning rate is applied"
+    )
+    parser.add_argument("--norm_w", type=bool, default = True, 
+                        help = "Normalized initial weight as descripted in Glorot's paper"
+    )
+    parser.add_argument("--ebd_delay_epoch", type=int, default = 4, 
+                        dest = "embedding_learning_delay_epochs", 
+                        help = "Embedding learning delay epochs"
+    )
+    parser.add_argument("--au", type=str, default = "tanh",
+                        dest = "conv_activation_unit", 
+                        help = "Activation unit type for the convolution layer"
+    )
+    parser.add_argument("--eps", type=float, default =0.000001 , 
+                        dest = "epsilon", 
+                        help = "Epsilon used by AdaDelta"
+    )
+    parser.add_argument("--rho", type=float, default = 0.95,
+                        help = "Rho used by AdaDelta"
+    )
+    parser.add_argument("--ebd_dm", type=int, default = 48,
+                        dest = "embed_dm", 
+                        help = "Dimension for word embedding"
+    )
+    parser.add_argument("--batch_size", type=int, default = 10, 
+                        dest = "batch_size", 
+                        help = "Batch size in the stochastic gradient descent"
+    )
+    parser.add_argument("--n_epochs", type=int, default =200,
+                        help = "Maximum number of epochs to perform during training"
+    )
+    parser.add_argument("--dr", type=float, default = [0.2, 0.5, 0.5], nargs="+",
+                        dest = "dropout_rates", 
+                        help = "Dropout rates at all layers except output layer"
+    )
+    parser.add_argument("--l2_regs", type = float, default = [0.00001, 0.0003, 0.0003, 0.0001], nargs="+",
+                        dest = "L2_regs", 
+                        help = "L2 regularization parameters at each layer. left/low->right/high"
+    )
+    parser.add_argument("--ks", type = int, default = [15, 6], nargs="+",
+                        help = "The k values of the k-max pooling operation"
+    )
+    parser.add_argument("--conv_layer_n", type=int, default = 2,
+                        help = "Number of convolution layers"
+    )
+    parser.add_argument("--nkerns", type=int, default = [6,12], nargs="+",
+                        help = "Number of feature maps at each conv layer"
+    )
+    parser.add_argument("--filter_widths", type=int, default = [10,7], nargs="+",
+                        help = "Filter width for each conv layer"
+    )
+
+    parser.add_argument("--img_prefix", type=str,
+                        help = "The prefix of the saved images."
+    )
+    
+
+    args = parser.parse_args(sys.argv[1:])
+
+    train_and_test(        
+        args,
+        print_config
     )
         

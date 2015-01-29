@@ -1,5 +1,5 @@
 """
-Testing adadelta algorithm
+Comparing adagrad, adadelta and constant learning in gradient descent(the seddle point function y^2 - x^2)
 
 Reference:
 1. comparison on several learning rate update scheme: http://ml.memect.com/archive/2014-12-12/short.html#3786866375172817
