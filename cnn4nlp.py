@@ -908,10 +908,10 @@ def train_and_test(args, print_config):
         if print_config["error_vs_epoch"]:
             ax = plot_error_vs_epoch(train_errors, dev_errors)
     
-        if not  args.img_prefix:
+        if not args.img_prefix:
             plt.show()
         else:
-            plt.savefig("plots/" + args.img_prefix + ".pdf")
+            plt.savefig("plots/" + args.img_prefix + ".png")
     
     end_time = time.clock()
     test_score = test_error()
@@ -961,23 +961,26 @@ if __name__ == "__main__":
     import argparse, sys
 
     parser = argparse.ArgumentParser(description = "CNN with k-max pooling for sentence classification")
-    parser.add_argument("--ext_ebd", type = bool, default = False,
-                        dest = "use_pretrained_embedding", 
-                        help = "Use external/pretrained word embedding or not"
-    )
+    
     parser.add_argument("--fold", type=int, default = [1,1], nargs="+",
                         dest = "fold_flags", 
                         help = "Flags that turn on/off folding"
     )
-    parser.add_argument("--l2", type=bool, default = True,
+    parser.add_argument("--ext_ebd", action = "store_true",
+                        dest = "use_pretrained_embedding",
+                        help = "Use external/pretrained word embedding or not. For unkown reasons, type checking does not work for this argument"
+    )
+
+    parser.add_argument("--l2", action = "store_true",
                         dest = "use_L2_reg", 
                         help = "Use L2 regularization or not"
     )
-    parser.add_argument("--lr", type=float, default = float, 
+    
+    parser.add_argument("--lr", type=float, default = 0.001, 
                         dest = "learning_rate", 
                         help = "Learning rate if constant learning rate is applied"
     )
-    parser.add_argument("--norm_w", type=bool, default = True, 
+    parser.add_argument("--norm_w", action = "store_true",
                         help = "Normalized initial weight as descripted in Glorot's paper"
     )
     parser.add_argument("--ebd_delay_epoch", type=int, default = 4, 
@@ -988,7 +991,7 @@ if __name__ == "__main__":
                         dest = "conv_activation_unit", 
                         help = "Activation unit type for the convolution layer"
     )
-    parser.add_argument("--eps", type=float, default =0.000001 , 
+    parser.add_argument("--eps", type=float, default =0.000001, 
                         dest = "epsilon", 
                         help = "Epsilon used by AdaDelta"
     )
@@ -1003,7 +1006,7 @@ if __name__ == "__main__":
                         dest = "batch_size", 
                         help = "Batch size in the stochastic gradient descent"
     )
-    parser.add_argument("--n_epochs", type=int, default =200,
+    parser.add_argument("--n_epochs", type=int, default =20,
                         help = "Maximum number of epochs to perform during training"
     )
     parser.add_argument("--dr", type=float, default = [0.2, 0.5, 0.5], nargs="+",
@@ -1026,7 +1029,6 @@ if __name__ == "__main__":
     parser.add_argument("--filter_widths", type=int, default = [10,7], nargs="+",
                         help = "Filter width for each conv layer"
     )
-
     parser.add_argument("--img_prefix", type=str,
                         help = "The prefix of the saved images."
     )
@@ -1034,6 +1036,8 @@ if __name__ == "__main__":
 
     args = parser.parse_args(sys.argv[1:])
 
+    print args
+    
     train_and_test(        
         args,
         print_config

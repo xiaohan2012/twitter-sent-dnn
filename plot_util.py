@@ -1,5 +1,8 @@
 import numpy as np
+import matplotlib
+matplotlib.use("Agg") # to enable plot on non X11 env
 from matplotlib import pyplot as plt
+
 def plot_track(means, stds, title):
     """
     Track means and stds as described in http://jmlr.org/proceedings/papers/v9/glorot10a/glorot10a.pdf
