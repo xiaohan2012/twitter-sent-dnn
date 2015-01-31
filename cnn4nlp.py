@@ -262,6 +262,9 @@ def train_and_test(args, print_config):
 
     assert args.conv_layer_n == len(args.filter_widths) == len(args.nkerns) == (len(args.L2_regs) - 2) == len(args.fold_flags) == len(args.ks)
 
+    # \mod{dim, 2^{\sum fold_flags}} == 0
+    assert args.embed_dm % (2 ** sum(args.fold_flags)) == 0
+    
     ###################
     # get the data    #
     ###################
@@ -383,7 +386,7 @@ def train_and_test(args, print_config):
     # last, the output layer
     # both dropout and without dropout
     if sum(args.fold_flags) > 0:
-        n_in = args.nkerns[-1] * args.ks[-1] * args.embed_dm / (sum(args.fold_flags)*2)
+        n_in = args.nkerns[-1] * args.ks[-1] * args.embed_dm / (2**sum(args.fold_flags))
     else:
         n_in = args.nkerns[-1] * args.ks[-1] * args.embed_dm
         
@@ -797,7 +800,7 @@ def train_and_test(args, print_config):
     dev_errors = []
     try:
         print "validation_frequency = %d" %validation_frequency
-        while (epoch < args.n_epochs) and (not done_looping):
+        while (epoch < args.n_epochs):
             epoch += 1
             print "At epoch {0}".format(epoch)
 
@@ -836,6 +839,30 @@ def train_and_test(args, print_config):
                     
                     train_errors.append(train_error_val)
                     dev_errors.append(dev_error_val)
+                    
+                    if dev_error_val < best_validation_loss:
+                        best_iter = iter
+                        #improve patience if loss improvement is good enough
+                        if dev_error_val < best_validation_loss *  \
+                           improvement_threshold:
+                            patience = max(patience, iter * patience_increase)
+
+                        best_validation_loss = dev_error_val
+
+                        test_error_val = test_error()
+
+                        print(
+                           (
+                               '     epoch %i, minibatch %i/%i, test error of'
+                                ' best dev error %f %%'
+                            ) %
+                            (
+                                epoch,
+                                minibatch_index + 1,
+                                n_train_batches,
+                                test_error_val * 100.
+                            )
+                        )
 
                 if (minibatch_index+1) % 50 == 0 or minibatch_index == n_train_batches - 1:
                     print "%d / %d minibatches completed" %(minibatch_index + 1, n_train_batches)                
@@ -845,7 +872,7 @@ def train_and_test(args, print_config):
                     if print_config["L2_sqr"]:
                         print "`L2_sqr`` for the past 50 minibatches is %f" %(np.mean(np.array(L2_sqrs)))
                         L2_sqrs = []                                                                            
-
+                    
                 ##################
                 # Plotting stuff #
                 ##################
@@ -884,6 +911,9 @@ def train_and_test(args, print_config):
                         layer_hist += layer_data.tolist()
                                     
     except KeyboardInterrupt:
+        import traceback
+        traceback.print_exc(file = sys.stdout)
+    finally:
         from plot_util import (plot_hist, 
                                plot_track, 
                                plot_error_vs_epoch, 
@@ -915,11 +945,10 @@ def train_and_test(args, print_config):
     
     end_time = time.clock()
     test_score = test_error()
-    print "test score %f" %(test_score * 100.)
 
     print(('Optimization complete. Best validation score of %f %% '
            'obtained at iteration %i, with test performance %f %%') %
-          (best_validation_loss * 100., best_iter + 1, test_score * 100.))
+          (best_validation_loss * 100., best_iter + 1, test_error_val * 100.))
     print >> sys.stderr, ('The code for file ' +
                           os.path.split(__file__)[1] +
                           ' ran for %.2fm' % ((end_time - start_time) / 60.))
@@ -1006,7 +1035,7 @@ if __name__ == "__main__":
                         dest = "batch_size", 
                         help = "Batch size in the stochastic gradient descent"
     )
-    parser.add_argument("--n_epochs", type=int, default =20,
+    parser.add_argument("--n_epochs", type=int, default =50,
                         help = "Maximum number of epochs to perform during training"
     )
     parser.add_argument("--dr", type=float, default = [0.2, 0.5, 0.5], nargs="+",
@@ -1036,7 +1065,12 @@ if __name__ == "__main__":
 
     args = parser.parse_args(sys.argv[1:])
 
-    print args
+    print "Configs:\n-------------\n"
+    for attr, value in vars(args).items():
+        print "%s: %r" %(
+            attr.ljust(25), 
+            value
+        )
     
     train_and_test(        
         args,
