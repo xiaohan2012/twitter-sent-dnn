@@ -62,7 +62,7 @@ def sample_params(n = 16, semi_random_params_key = 'conv_layer_n'):
     samples = []
     i = 0
     
-    while i <= n:
+    while i < n:
         # random hyper parameters        
         params = {}
         for key in CONSTS:
@@ -98,7 +98,7 @@ def _format_value(v, tuple_sep = ' '):
     else:
         return str(v)
 
-def format_params_to_cmd(params, prefix = "python cnn4nlp.py --l2  --norm_w --ebd_delay_epoch=0 --au=tanh "):
+def format_params_to_cmd(params, prefix = "python cnn4nlp.py --l2  --norm_w --ebd_delay_epoch=0 --au=tanh --n_epochs=200"):
     params_str = params2str(params)
     sig = params2str(params, cmd_sep = ',,', key_val_sep = '=', tuple_sep = ',', key_prefix = '')
     return "%s %s --img_prefix=%s"%(
@@ -113,8 +113,8 @@ def params2str(params, cmd_sep = ' ',key_val_sep = ' ', tuple_sep = ' ', key_pre
                          for key, value in params.items()])
     
 if __name__ ==  "__main__":
-    possibility_n = np.product(map(len, CONSTS.values()))
+    possibility_n = np.product([len(i['values']) for i in CONSTS.values()])
     print "possibility_n = %d" %(possibility_n)
-    n = 16
+    n = possibility_n
     for param in sample_params(n):
         print format_params_to_cmd(param)
