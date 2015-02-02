@@ -936,8 +936,12 @@ def train_and_test(args, print_config):
             plot_hist(weight_grad_hist_data, "weight_grad_hist")
 
         if print_config["error_vs_epoch"]:
-            ax = plot_error_vs_epoch(train_errors, dev_errors)
-    
+            ax = plot_error_vs_epoch(train_errors, dev_errors, 
+                                     title = ('Best dev score: %f %% '
+                                              ' at iter %i with test error %f %%') %(
+                                                  best_validation_loss * 100., best_iter + 1, test_error_val * 100.
+                                              )
+            )
         if not args.img_prefix:
             plt.show()
         else:
@@ -945,7 +949,7 @@ def train_and_test(args, print_config):
     
     end_time = time.clock()
     test_score = test_error()
-
+    
     print(('Optimization complete. Best validation score of %f %% '
            'obtained at iteration %i, with test performance %f %%') %
           (best_validation_loss * 100., best_iter + 1, test_error_val * 100.))

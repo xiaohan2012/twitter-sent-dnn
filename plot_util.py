@@ -57,7 +57,7 @@ def plot_hist(rows, title):
     ax.legend(loc='best', fancybox = True)
 
 
-def plot_error_vs_epoch(train_errors, dev_errors):
+def plot_error_vs_epoch(train_errors, dev_errors, title):
     assert len(train_errors) == len(dev_errors)
     fig = plt.figure()
     ax = fig.add_subplot(111)
@@ -66,9 +66,8 @@ def plot_error_vs_epoch(train_errors, dev_errors):
     ax.hold(True)
     ax.plot(dev_errors, 'bo-', label =  "Dev error")
 
-    ax.set_title("Training/dev error vs epoch")
+    ax.set_title(title)
     ax.legend(loc = 'best', fancybox = True)
     ax.set_xlabel('Age')
     ax.set_ylabel('Error')
     ax.set_ylim([0,1])
-    ax.set_xlim([0,20])

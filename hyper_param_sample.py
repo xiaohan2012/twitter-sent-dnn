@@ -33,7 +33,6 @@ CONSTS['ebd_dm'] = {
 def coin_toss(p = 0.5):
     return np.random.binomial(n = 1, p = p, size = (1, ))
 
-
 # semi-random ones
 SEMI_RANDOM_PARAMS = {
     'ks': {
