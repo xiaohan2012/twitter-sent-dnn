@@ -48,8 +48,8 @@ SEMI_RANDOM_PARAMS = {
         3: (6, 5, 3)
     }, 
     'l2_regs': {
-        2: (1e-4, 3e-5, 3e-5, 1e-4),
-        3: (1e-4, 3e-5, 3e-6, 1e-5, 1e-4),
+        2: (1e-6, 3e-5, 3e-5, 1e-4),
+        3: (1e-6, 3e-5, 3e-6, 1e-5, 1e-4),
     }
 }
 
@@ -97,7 +97,7 @@ def _format_value(v, tuple_sep = ' '):
     else:
         return str(v)
 
-def format_params_to_cmd(params, prefix = "python cnn4nlp.py --l2  --norm_w --ebd_delay_epoch=0 --au=tanh --n_epochs=200"):
+def format_params_to_cmd(params, prefix = "python cnn4nlp.py --l2  --norm_w --ebd_delay_epoch=0 --au=tanh --n_epochs=20"):
     params_str = params2str(params)
     sig = params2str(params, cmd_sep = ',,', key_val_sep = '=', tuple_sep = ',', key_prefix = '')
     return "%s %s --img_prefix=%s"%(

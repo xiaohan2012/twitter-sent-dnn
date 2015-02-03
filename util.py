@@ -13,7 +13,7 @@ from codecs import open
 from collections import (OrderedDict, Counter)
 
 import theano.tensor as T
-from ptb import (parse, flatten_tree)
+from ptb import (parse, flattened_subtrees, flatten_tree)
 
 def load_data(dataset='mnist.pkl.gz'):
     ''' Loads the dataset
@@ -226,13 +226,18 @@ def process_stanford_sentiment_corpus(train_path, dev_path, test_path,
     with open(train_path, "r", "utf8") as train_f, \
          open(dev_path, "r", "utf8") as dev_f, \
          open(test_path, "r", "utf8") as test_f:
-        train_sents, train_labels = zip(*[flatten_tree(parse(l)) 
-                                          for l in train_f])
-        dev_sents, dev_labels = zip(*[flatten_tree(parse(l)) 
+        #flattened subtrees for training data only
+        train_sents, train_labels = zip(*[sub_sent
+                                          for l in train_f
+                                          for sub_sent in flattened_subtrees(parse(l))])
+        dev_sents, dev_labels = zip(*[flatten_tree(parse(l))
                                       for l in dev_f])
-        test_sents, test_labels = zip(*[flatten_tree(parse(l)) 
+        test_sents, test_labels = zip(*[flatten_tree(parse(l))
                                         for l in test_f])
 
+    print "Train sent size: %d\nDev sent size: %d\nTest sent size: %d" %(
+        len(train_sents), len(dev_sents), len(test_sents)
+    )
     # gathering sentence length information
     sent_lens = [len(sent) 
                  for sent in train_sents]

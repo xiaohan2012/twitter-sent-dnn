@@ -278,6 +278,9 @@ def train_and_test(args, print_config):
     index2word = datasets[4]
 
     n_train_batches = train_set_x.get_value(borrow=True).shape[0] / args.batch_size
+    n_dev_batches = dev_set_x.get_value(borrow=True).shape[0] / args.dev_test_batch_size
+    n_test_batches = test_set_x.get_value(borrow=True).shape[0] / args.dev_test_batch_size
+    
     train_sent_len = train_set_x.get_value(borrow=True).shape[1]
     possible_labels =  set(train_set_y.get_value().tolist())
     
@@ -525,7 +528,7 @@ def train_and_test(args, print_config):
     train_model = make_train_func(cost, updates)
 
     def make_error_func(x_val, y_val):
-        return theano.function(inputs = [],
+        return theano.function(inputs = [batch_index],
                                outputs = errors, 
                                givens = {
                                    x: x_val,
@@ -533,11 +536,14 @@ def train_and_test(args, print_config):
                                }, 
                            )
         
-    train_error = make_error_func(train_set_x, train_set_y)
+    train_error = make_error_func (train_set_x[batch_index * args.batch_size: (batch_index + 1) * args.batch_size], 
+                                   train_set_y[batch_index * args.batch_size: (batch_index + 1) * args.batch_size])
 
-    dev_error = make_error_func(dev_set_x, dev_set_y)
+    dev_error = make_error_func(dev_set_x[batch_index * args.batch_size: (batch_index + 1) * args.batch_size], 
+                                dev_set_y[batch_index * args.batch_size: (batch_index + 1) * args.batch_size])
 
-    test_error = make_error_func(test_set_x, test_set_y)
+    test_error = make_error_func(test_set_x[batch_index * args.batch_size: (batch_index + 1) * args.batch_size], 
+                                 test_set_y[batch_index * args.batch_size: (batch_index + 1) * args.batch_size])
     
 
     #############################
@@ -827,17 +833,26 @@ def train_and_test(args, print_config):
                 iter = (epoch - 1) * n_train_batches + minibatch_index
                 
                 if (iter + 1) % validation_frequency == 0:
-                    train_error_val = train_error()
-                    dev_error_val = dev_error()
+
+                    # train_error_val = np.mean([train_error(i)
+                    #                            for i in xrange(n_train_batches)])
+                    dev_error_val = np.mean([dev_error(i)
+                                             for i in xrange(n_dev_batches)])
                     
-                    print "At epoch %d and minibatch %d. \nTrain error %.2f%%\nDev error %.2f%%\n" %(
+                    # print "At epoch %d and minibatch %d. \nTrain error %.2f%%\nDev error %.2f%%\n" %(
+                    #     epoch, 
+                    #     minibatch_index,
+                    #     train_error_val * 100, 
+                    #     dev_error_val * 100
+                    # )
+
+                    print "At epoch %d and minibatch %d. \nDev error %.2f%%\n" %(
                         epoch, 
                         minibatch_index,
-                        train_error_val * 100, 
                         dev_error_val * 100
                     )
                     
-                    train_errors.append(train_error_val)
+                    # train_errors.append(train_error_val)
                     dev_errors.append(dev_error_val)
                     
                     if dev_error_val < best_validation_loss:
@@ -849,7 +864,8 @@ def train_and_test(args, print_config):
 
                         best_validation_loss = dev_error_val
 
-                        test_error_val = test_error()
+                        test_error_val = np.mean([test_error(i)
+                                                  for i in xrange(n_test_batches)])
 
                         print(
                            (
@@ -910,7 +926,7 @@ def train_and_test(args, print_config):
                     for layer_hist, layer_data in zip(weight_grad_hist_data , get_weight_grads(minibatch_index)):
                         layer_hist += layer_data.tolist()
                                     
-    except KeyboardInterrupt:
+    except:
         import traceback
         traceback.print_exc(file = sys.stdout)
     finally:
@@ -936,6 +952,7 @@ def train_and_test(args, print_config):
             plot_hist(weight_grad_hist_data, "weight_grad_hist")
 
         if print_config["error_vs_epoch"]:
+            train_errors = [0] * len(dev_errors)
             ax = plot_error_vs_epoch(train_errors, dev_errors, 
                                      title = ('Best dev score: %f %% '
                                               ' at iter %i with test error %f %%') %(
@@ -948,7 +965,6 @@ def train_and_test(args, print_config):
             plt.savefig("plots/" + args.img_prefix + ".png")
     
     end_time = time.clock()
-    test_score = test_error()
     
     print(('Optimization complete. Best validation score of %f %% '
            'obtained at iteration %i, with test performance %f %%') %
@@ -1039,6 +1055,11 @@ if __name__ == "__main__":
                         dest = "batch_size", 
                         help = "Batch size in the stochastic gradient descent"
     )
+
+    parser.add_argument("--dev_test_batch_size", type=int, default = 1000, 
+                        help = "Batch size for dev/test data"
+    )
+    
     parser.add_argument("--n_epochs", type=int, default =50,
                         help = "Maximum number of epochs to perform during training"
     )
@@ -1066,7 +1087,6 @@ if __name__ == "__main__":
                         help = "The prefix of the saved images."
     )
     
-
     args = parser.parse_args(sys.argv[1:])
 
     print "Configs:\n-------------\n"

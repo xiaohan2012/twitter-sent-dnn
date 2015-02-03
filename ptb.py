@@ -59,6 +59,23 @@ def parse(s):
         return (int(s[1]), s[2:-1].strip())
 
 
+def flattened_subtrees(t):
+    """return all subtrees in flattened format as well as the labels
+
+    >>> t = parse('(4 (3 gorgeously) (3 (2 elaborate) (2 continuation)))')
+    >>> flattened_subtrees(t)
+    [(['gorgeously', 'elaborate', 'continuation'], 4), (['gorgeously'], 3), (['elaborate', 'continuation'], 3), (['elaborate'], 2), (['continuation'], 2)]
+    """
+    def aux(t):
+        if len(t) == 2: # is leaf
+            return [([t[1]], t[0])]
+        else:
+            left = flatten_tree(t[1])[0]
+            right = flatten_tree(t[2])[0]
+            return [(left + right, t[0])] + aux(t[1]) +  aux(t[2])
+            
+    return aux(t)
+
 def flatten_tree(t):
     """
     flattena a PTB tree, return:
