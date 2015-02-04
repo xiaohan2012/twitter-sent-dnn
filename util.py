@@ -354,7 +354,7 @@ def process_stanford_sentiment_corpus(train_path, dev_path, test_path,
 
 def share_dataset(x, y):
     shared_x = theano.shared(
-        np.asarray(x, dtype = theano.config.floatX),
+        np.asarray(x, dtype = np.int32),
         borrow = True)
     
     shared_y = theano.shared(
@@ -367,24 +367,28 @@ def share_dataset(x, y):
 def convert_nal_data(src_path, pkl_path):
     """convert the data in Nal's code to some format that is usable by me"""
     data = io.loadmat(src_path)
-    
+
+
     word2index = {
         unicode(row[0][0] if row[0].size>0 else ''): i
         for i, row in enumerate(data["index"])
     }
+    
+    # add padding
+    word2index[u"<PADDING>"] = len(word2index)
+
     index2word = {
         i: word
         for word, i  in word2index.items()
     }
-    
-    train = (data["train"], data["train_lbl"][:,0])
-    dev = (data["valid"], data["valid_lbl"][:,0])
-    test = (data["test"], data["test_lbl"][:,0])
+    train = (data["train"] - 1, data["train_lbl"][:,0] - 1)
+    dev = (data["valid"] - 1, data["valid_lbl"][:,0] - 1)
+    test = (data["test"] - 1, data["test_lbl"][:,0] - 1)
 
     print "dumping result"
     pickle.dump(
         (
-            train,
+            train, #matlab' index starts at 1
             dev, 
             test,
             word2index,
@@ -422,6 +426,14 @@ def load_data(pkl_path):
             )
     )
 
+def dump_params(params, path):
+    """
+    params: list of thenao.tensor.TensorType
+    """
+    data = [(param.name, param.get_value())
+            for param in params]
+    pickle.dump(data, open(path, "w"))
+    
 if __name__ == "__main__":
     # process_stanford_sentiment_corpus('data/stanfordSentimentTreebank/trees/train.txt', 
     #                                   'data/stanfordSentimentTreebank/trees/dev.txt', 

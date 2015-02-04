@@ -9,7 +9,7 @@ import math, random
 import numpy as np
 import theano
 import theano.tensor as T
-from util import load_data
+from util import (load_data, dump_params)
 
 from logreg import LogisticRegression
 
@@ -44,7 +44,7 @@ class WordEmbeddingLayer(object):
         else:
             print "Use pretrained embeddings: OFF"
             embedding_val = np.asarray(
-                rng.uniform(low = -0.5, high = 0.5, size = (vocab_size, embed_dm)), 
+                rng.normal(0, 0.05, size = (vocab_size, embed_dm)), 
                 dtype = theano.config.floatX
             )
             
@@ -258,6 +258,7 @@ class DropoutLayer(object):
 
         self.output = input * T.cast(mask, theano.config.floatX)
 
+
 def train_and_test(args, print_config):
 
     assert args.conv_layer_n == len(args.filter_widths) == len(args.nkerns) == (len(args.L2_regs) - 2) == len(args.fold_flags) == len(args.ks)
@@ -304,7 +305,7 @@ def train_and_test(args, print_config):
     # Layer 1, the embedding layer
     layer1 = WordEmbeddingLayer(rng, 
                                 input = x, 
-                                vocab_size = len(word2index), 
+                                vocab_size = len(word2index),
                                 embed_dm = args.embed_dm, 
                                 embeddings = (
                                     pretrained_embeddings 
@@ -444,7 +445,7 @@ def train_and_test(args, print_config):
     param_shapes=  [param for layer in param_layers for param in layer.param_shapes]                                
     
     param_grads = [T.grad(cost, param) for param in params]
-
+        
     # AdaDelta parameter update
     # E[g^2]
     # initialized to zero
@@ -512,15 +513,14 @@ def train_and_test(args, print_config):
                                givens = {
                                    x: train_set_x[batch_index * args.batch_size: (batch_index + 1) * args.batch_size],
                                    y: train_set_y[batch_index * args.batch_size: (batch_index + 1) * args.batch_size]
-                               },
-                               mode='DebugMode'
+                               }
         )        
 
     train_model_no_ebd = make_train_func(cost_no_ebd, updates_no_emb)
     train_model = make_train_func(cost, updates)
 
     def make_error_func(x_val, y_val):
-        return theano.function(inputs = [batch_index],
+        return theano.function(inputs = [],
                                outputs = errors, 
                                givens = {
                                    x: x_val,
@@ -528,14 +528,9 @@ def train_and_test(args, print_config):
                                }, 
                            )
         
-    train_error = make_error_func (train_set_x[batch_index * args.batch_size: (batch_index + 1) * args.batch_size], 
-                                   train_set_y[batch_index * args.batch_size: (batch_index + 1) * args.batch_size])
+    dev_error = make_error_func(dev_set_x, dev_set_y)
 
-    dev_error = make_error_func(dev_set_x[batch_index * args.batch_size: (batch_index + 1) * args.batch_size], 
-                                dev_set_y[batch_index * args.batch_size: (batch_index + 1) * args.batch_size])
-
-    test_error = make_error_func(test_set_x[batch_index * args.batch_size: (batch_index + 1) * args.batch_size], 
-                                 test_set_y[batch_index * args.batch_size: (batch_index + 1) * args.batch_size])
+    test_error = make_error_func(test_set_x, test_set_y)
     
 
     #############################
@@ -659,117 +654,10 @@ def train_and_test(args, print_config):
                 for g in weight_grads
             ], 
             givens = train_data_at_index_with_y
-        )
-        
-    if print_config["adadelta_lr_mean"]:
-        print_adadelta_lr_mean = theano.function(
-            inputs = [],
-            outputs = [
-                theano.printing.Print("adadelta mean:" +eg.name)(
-                    T.mean(T.sqrt(ex + epsilon) / T.sqrt(eg + epsilon))
-                )
-                for eg, ex in zip(egs, exs)
-            ]
-        )
-
-    if print_config["adagrad_lr_mean"]:
-        print_adagrad_lr_mean = theano.function(
-            inputs = [],
-            outputs = [
-                theano.printing.Print("adagrad mean")(
-                    T.mean(sq)
-                )
-                for sq in sqs
-            ]
-        )
-        
-    if print_config["embeddings"]:
-        print_embeddings = theano.function(
-            inputs = [],
-            outputs = theano.printing.Print("embeddings")(layers[0].embeddings)
-        )
-    
-    if print_config["logreg_W"]:
-        print_logreg_W = theano.function(
-            inputs = [],
-            outputs = theano.printing.Print(layers[-1].W.name)(layers[-1].W)
-        )
-        
-    if print_config["logreg_b"]:
-        print_logreg_b = theano.function(
-            inputs = [],
-            outputs = theano.printing.Print(layers[-1].b.name)(layers[-1].b)
-        )
-
-    if print_config["conv_layer1_W"]:
-        print_convlayer1_W = theano.function(
-            inputs = [],
-            outputs = theano.printing.Print("conv_l1.W")(layers[1].W)
-        )
-
-    if print_config["conv_layer2_W"]:
-        print_convlayer2_W = theano.function(
-            inputs = [],
-            outputs = theano.printing.Print("conv_l2.W")(layers[2].W)
-        )
-
-    if print_config["p_y_given_x"]:
-        print_p_y_given_x = theano.function(
-            inputs = [batch_index],
-            outputs = theano.printing.Print("p_y_given_x")(layers[-1].p_y_given_x),
-            givens = train_data_at_index
-        )
-
-    if print_config["l1_output"]:
-        print_l1_output = theano.function(
-            inputs = [batch_index],
-            outputs = theano.printing.Print("l1_output")(layers[0].output),
-            givens = train_data_at_index
-        )
-
-
-    if print_config["dropout_l1_output"]:
-        print_dropout_l1_output = theano.function(
-            inputs = [batch_index],
-            outputs = theano.printing.Print("dropout_l1_output")(dropout_layers[0].output),
-            givens = train_data_at_index
-        )
-        
-    if print_config["l2_output"]:
-        print_l2_output = theano.function(
-            inputs = [batch_index],
-            outputs = theano.printing.Print("l2_output")(layers[1].output),
-            givens = train_data_at_index
-        )
-
-    if print_config["dropout_l2_output"]:
-        print_dropout_l2_output = theano.function(
-            inputs = [batch_index],
-            outputs = theano.printing.Print("dropout_l2_output")(dropout_layers[1].output),
-            givens = train_data_at_index
-        )
-
-    if print_config["l3_output"]:
-        print_l3_output = theano.function(
-            inputs = [batch_index],
-            outputs = theano.printing.Print("l3_output")(layers[2].output),
-            givens = train_data_at_index
-        )
-        
-    param_n = sum([1. for l in param_layers for p in l.params])
-    if print_config["param_weight_mean"]:
-        print_param_weight_mean = theano.function(
-            inputs = [], 
-            outputs = [theano.printing.Print("weight mean:" + p.name)(
-                T.mean(T.abs_(p))
-            )
-                       for l in param_layers
-                       for p in l.params]
-        )
-
+        )        
     
     #the training loop
-    patience = 500  # look as this many examples regardless
+    patience = 10000  # look as this many examples regardless
     patience_increase = 2  # wait this much longer when a new best is
                                   # found
     improvement_threshold = 0.995  # a relative improvement of this much is
@@ -828,8 +716,7 @@ def train_and_test(args, print_config):
 
                     # train_error_val = np.mean([train_error(i)
                     #                            for i in xrange(n_train_batches)])
-                    dev_error_val = np.mean([dev_error(i)
-                                             for i in xrange(n_dev_batches)])
+                    dev_error_val = dev_error()
                     
                     # print "At epoch %d and minibatch %d. \nTrain error %.2f%%\nDev error %.2f%%\n" %(
                     #     epoch, 
@@ -856,8 +743,7 @@ def train_and_test(args, print_config):
 
                         best_validation_loss = dev_error_val
 
-                        test_error_val = np.mean([test_error(i)
-                                                  for i in xrange(n_test_batches)])
+                        test_error_val = test_error()
 
                         print(
                            (
@@ -871,6 +757,9 @@ def train_and_test(args, print_config):
                                 test_error_val * 100.
                             )
                         )
+
+                        print "Dumping model to %s" %(args.model_path)
+                        dump_params(params, args.model_path)
 
                 if (minibatch_index+1) % 50 == 0 or minibatch_index == n_train_batches - 1:
                     print "%d / %d minibatches completed" %(minibatch_index + 1, n_train_batches)                
@@ -1003,8 +892,14 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description = "CNN with k-max pooling for sentence classification")
     
-    parser.add_argument('--corpus_path', type=str, default='data/twitter.pkl', 
+    parser.add_argument('--corpus_path', type=str,
+                        required = True,
                        help = 'Path of preprocessed corpus'
+    )
+
+    parser.add_argument('--model_path', type=str, 
+                        required = True,
+                        help = 'Path of model parameters'
     )
     
     parser.add_argument("--fold", type=int, default = [1,1], nargs="+",
