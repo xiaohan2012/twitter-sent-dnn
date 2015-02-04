@@ -425,6 +425,7 @@ def train_and_test(args, print_config):
         cost_no_ebd = dropout_cost + L2_sqr_no_ebd
     else:
         cost = dropout_cost
+        cost_no_ebd = dropout_cost
     
     ###############################
     # Parameters to be used       #
