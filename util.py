@@ -11,6 +11,7 @@ except ImportError:
 import pdb
 from codecs import open
 from collections import (OrderedDict, Counter)
+from scipy import io
 
 import theano.tensor as T
 from ptb import (parse, flattened_subtrees, flatten_tree)
@@ -325,12 +326,15 @@ def process_stanford_sentiment_corpus(train_path, dev_path, test_path,
     dev_x, dev_y = create_dataset(dev_sents, dev_labels, dev_sent_max_len)
     test_x, test_y = create_dataset(test_sents, test_labels, test_sent_max_len)
     
+    
+    # load the pretrained embedding
     pkl_data = (
         (train_x, train_y),
         (dev_x, dev_y),
         (test_x, test_y),
         word2index,
-        index2word
+        index2word, 
+        np.load("data/stanfordSentimentTreebank/trees/pretrained.npy")
     )
     
     print "dumping pickle to %s" %(pkl_path)
@@ -347,44 +351,81 @@ def process_stanford_sentiment_corpus(train_path, dev_path, test_path,
         print test_y[0]
         
     return pkl_data
+
+def share_dataset(x, y):
+    shared_x = theano.shared(
+        np.asarray(x, dtype = theano.config.floatX),
+        borrow = True)
     
+    shared_y = theano.shared(
+        np.asarray(y, dtype = np.int32),
+        borrow = True
+    )
+
+    return shared_x, shared_y
     
-def stanford_sentiment(pkl_path, corpus_folder):
+def convert_nal_data(src_path, pkl_path):
+    """convert the data in Nal's code to some format that is usable by me"""
+    data = io.loadmat(src_path)
+    
+    word2index = {
+        unicode(row[0][0] if row[0].size>0 else ''): i
+        for i, row in enumerate(data["index"])
+    }
+    index2word = {
+        i: word
+        for word, i  in word2index.items()
+    }
+    
+    train = (data["train"], data["train_lbl"][:,0])
+    dev = (data["valid"], data["valid_lbl"][:,0])
+    test = (data["test"], data["test_lbl"][:,0])
+
+    print "dumping result"
+    pickle.dump(
+        (
+            train,
+            dev, 
+            test,
+            word2index,
+            index2word,
+            np.transpose(data['vocab_emb'])
+        ), 
+        open(pkl_path, "w")
+    )
+
+
+def load_data(pkl_path):
     """
-    load the Stanford stentiment dataset
+    load the sentiment dataset, either Stanford or Twitter
 
-    Return 3 set of data, train, validate and test
-
-    Each dataset is a list of (word indices, int)
+    Return:
+    - train
+    - dev
+    - test
+    - word2index
+    - index2word
+    - pretrained embedding
     """
-    if not os.path.exists(pkl_path):
-        print "Pickle file does not exist.\n Generate it."
-        data = process_stanford_sentiment_corpus(os.path.join(corpus_folder, 'train.txt'), 
-                                                 os.path.join(corpus_folder, 'dev.txt'),
-                                                 os.path.join(corpus_folder, 'test.txt'),
-                                                 pkl_path = pkl_path, 
-                                                 unk_threshold = 3)
-    else:
-        data = pickle.load(open(pkl_path, 'r'))
-
-    def share_dataset(x, y):
-        shared_x = theano.shared(x, borrow = True)
-        
-        shared_y = theano.shared(y, borrow = True)
-
-        return shared_x, shared_y
-
+    data = pickle.load(open(pkl_path, 'r'))
     return (share_dataset(*data[0]), #train
             share_dataset(*data[1]), #dev
             share_dataset(*data[2]), #test
             data[3], 
-            data[4])
-        
+            data[4], 
+            theano.shared(
+                value = np.asarray(
+                    data[5],
+                    dtype=theano.config.floatX),
+                name = "embeddings", 
+                borrow = True,
+            )
+    )
 
 if __name__ == "__main__":
-    process_stanford_sentiment_corpus('data/stanfordSentimentTreebank/trees/train.txt', 
-                                      'data/stanfordSentimentTreebank/trees/dev.txt', 
-                                      'data/stanfordSentimentTreebank/trees/test.txt', 
-                                      'data/stanfordSentimentTreebank/trees/processed.pkl', 
-                                      unk_threshold = 3)
-    
+    # process_stanford_sentiment_corpus('data/stanfordSentimentTreebank/trees/train.txt', 
+    #                                   'data/stanfordSentimentTreebank/trees/dev.txt', 
+    #                                   'data/stanfordSentimentTreebank/trees/test.txt', 
+    #                                   'data/stanfordSentimentTreebank/trees/processed.pkl', 
+    #                                   unk_threshold = 3)
+    convert_nal_data("data/twitter.mat", "data/twitter.pkl")    

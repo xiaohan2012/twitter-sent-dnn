@@ -9,7 +9,7 @@ import math, random
 import numpy as np
 import theano
 import theano.tensor as T
-import util
+from util import load_data
 
 from logreg import LogisticRegression
 
@@ -268,14 +268,14 @@ def train_and_test(args, print_config):
     ###################
     # get the data    #
     ###################
-    datasets = util.stanford_sentiment('data/stanfordSentimentTreebank/trees/processed.pkl',
-                                       corpus_folder = 'data/stanfordSentimentTreebank/trees/')
+    datasets = load_data(args.corpus_path)
     
     train_set_x, train_set_y = datasets[0]
     dev_set_x, dev_set_y = datasets[1]
     test_set_x, test_set_y = datasets[2]
     word2index = datasets[3]
     index2word = datasets[4]
+    pretrained_embeddings = datasets[5]
 
     n_train_batches = train_set_x.get_value(borrow=True).shape[0] / args.batch_size
     n_dev_batches = dev_set_x.get_value(borrow=True).shape[0] / args.dev_test_batch_size
@@ -284,7 +284,9 @@ def train_and_test(args, print_config):
     train_sent_len = train_set_x.get_value(borrow=True).shape[1]
     possible_labels =  set(train_set_y.get_value().tolist())
     
-    
+    if args.use_pretrained_embedding:
+        args.embed_dm = pretrained_embeddings.get_value().shape[1]
+        
     ###################################
     # Symbolic variable definition    #
     ###################################
@@ -295,18 +297,6 @@ def train_and_test(args, print_config):
     batch_index = T.iscalar('batch_index')
     
     rng = np.random.RandomState(1234)        
-        
-    ###############################
-    # Load pretrained embedding   #
-    ###############################    
-    pretrained_embeddings = theano.shared(
-        value = np.asarray(
-            np.load("data/stanfordSentimentTreebank/trees/pretrained.npy"), 
-            dtype=theano.config.floatX
-        ),
-        name = "embeddings", 
-        borrow = True,
-    )
     
     ###############################
     # Construction of the network #
@@ -522,6 +512,7 @@ def train_and_test(args, print_config):
                                    x: train_set_x[batch_index * args.batch_size: (batch_index + 1) * args.batch_size],
                                    y: train_set_y[batch_index * args.batch_size: (batch_index + 1) * args.batch_size]
                                },
+                               mode='DebugMode'
         )        
 
     train_model_no_ebd = make_train_func(cost_no_ebd, updates_no_emb)
@@ -1010,6 +1001,10 @@ if __name__ == "__main__":
     import argparse, sys
 
     parser = argparse.ArgumentParser(description = "CNN with k-max pooling for sentence classification")
+    
+    parser.add_argument('--corpus_path', type=str, default='data/twitter.pkl', 
+                       help = 'Path of preprocessed corpus'
+    )
     
     parser.add_argument("--fold", type=int, default = [1,1], nargs="+",
                         dest = "fold_flags", 
