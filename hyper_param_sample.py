@@ -11,23 +11,36 @@ CONSTS = OrderedDict()
 
 CONSTS['conv_layer_n'] = {
     'values': [2, 3],
+    'on': True
 }
 CONSTS['fold'] = {
     'values': [0, 1], 
-    'depends_on': 'conv_layer_n'
+    'depends_on': 'conv_layer_n', 
+    'repeat': True,
+    'on': True
 }
 CONSTS['dr'] = {
     'values': [0.5], 
-    'depends_on': 'conv_layer_n'
+    'depends_on': 'conv_layer_n',
+    'on': True
 }
 CONSTS['ext_ebd'] = {
-    'values': [True, False], 
+    'values': [True, False],
+    'on': False
 }
 CONSTS['batch_size'] = {
     'values': [9, 10, 11, 12], 
+    'on': True
 }
 CONSTS['ebd_dm'] = {
-    'values': [48]
+    'values': [48],
+    'on': True
+}
+
+CONSTS['l2_regs'] = {
+    'values': [1e-3, 1e-4, 1e-5, 1e-6],
+    'depends_on': 'conv_layer_n+2',
+    'on': False
 }
 
 def coin_toss(p = 0.5):
@@ -65,11 +78,23 @@ def sample_params(n = 16, semi_random_params_key = 'conv_layer_n'):
         # random hyper parameters        
         params = {}
         for key in CONSTS:
+            if not CONSTS[key]['on']:
+                continue
+            
             depends_on = CONSTS[key].get('depends_on')
             value = random.choice(CONSTS[key]['values'])
             if depends_on:
-                dup_times = params[depends_on]
-                params[key] = tuple([value]) * dup_times
+                
+                if '+' in depends_on: # extra times
+                    name, extra_n_str = depends_on.split('+')
+                    dup_times = params[name] + int(extra_n_str.strip())
+                else:
+                    dup_times = params[depends_on]
+
+                if CONSTS[key].get('repeat'):
+                    params[key] = tuple([value]) * dup_times
+                else:
+                    params[key] = tuple([random.choice(CONSTS[key]['values']) for _ in xrange(dup_times)])
             else:
                 if isinstance(value, bool): #it's bool, show or hide
                     if value:
@@ -97,11 +122,11 @@ def _format_value(v, tuple_sep = ' '):
     else:
         return str(v)
 
-def format_params_to_cmd(params, prefix = "python cnn4nlp.py --l2  --norm_w --ebd_delay_epoch=0 --au=tanh --n_epochs=20"):
+def format_params_to_cmd(name, params, prefix = "python cnn4nlp.py --corpus_path=data/twitter.pkl --model_path=models/twitter.pkl --l2  --norm_w --ebd_delay_epoch=0 --au=tanh"):
     params_str = params2str(params)
     sig = params2str(params, cmd_sep = ',,', key_val_sep = '=', tuple_sep = ',', key_prefix = '')
-    return "%s %s --img_prefix=%s"%(
-        prefix, params_str, sig
+    return "%s %s --img_prefix=%s,,%s"%(
+        prefix, params_str, name, sig
     )
 
 def params2str(params, cmd_sep = ' ',key_val_sep = ' ', tuple_sep = ' ', key_prefix = '--'):
@@ -112,8 +137,10 @@ def params2str(params, cmd_sep = ' ',key_val_sep = ' ', tuple_sep = ' ', key_pre
                          for key, value in params.items()])
     
 if __name__ ==  "__main__":
-    possibility_n = np.product([len(i['values']) for i in CONSTS.values()])
-    print "possibility_n = %d" %(possibility_n)
-    n = possibility_n
-    for param in sample_params(n):
-        print format_params_to_cmd(param)
+    import sys
+    name = sys.argv[1]
+    
+    possibility_n = np.product([len(v['values']) for k,v in CONSTS.items() if v['on']])
+    # print "possibility_n = %d" %(possibility_n)
+    for param in sample_params(possibility_n):
+        print format_params_to_cmd(name, param)
