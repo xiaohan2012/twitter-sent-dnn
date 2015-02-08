@@ -1,3 +1,17 @@
 #! /bin/bash
 
-cat hyper_param_cmds.list | parallel  --progress -S ukko191,ukko132,ukko136,ukko017,ukko114,ukko189,ukko139   --workdir . --tmpdir parallel_output --files  --jobs 5
+
+cmd_file=$1
+
+if [ -z "$cmd_file" ]; then
+	echo "cmd file should be given"
+	exit -1
+fi
+
+servers=$(<servers.lst)
+echo "SERVERS TO DEPLOY: "
+echo $servers
+
+cat $cmd_file | parallel  --progress -S  $servers  --workdir . --tmpdir parallel_output --files  --jobs 5
+
+
