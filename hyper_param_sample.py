@@ -5,19 +5,29 @@ Sampling hyper parameters
 import numpy as np
 import random
 from collections import OrderedDict
+import sys
 
 # domain range and configs
 CONSTS = OrderedDict()
 
+# Semantic:
+# - repeat: iid sampling repeat
+# - values: choices to samplen from
+# - default: the default value to use if `on` is false
+# - on: whether to sample it or nor
+# - depends_on: the array length depends on the given variable name
+
 CONSTS['conv_layer_n'] = {
     'values': [2, 3],
-    'on': True
+    'default': 2,
+    'on': False
 }
 CONSTS['fold'] = {
     'values': [0, 1], 
     'depends_on': 'conv_layer_n', 
+    'default': 1,
     'repeat': True,
-    'on': True
+    'on': False
 }
 CONSTS['dr'] = {
     'values': [0.5], 
@@ -26,11 +36,13 @@ CONSTS['dr'] = {
 }
 CONSTS['ext_ebd'] = {
     'values': [True, False],
+    'default': False,
     'on': False
 }
 CONSTS['batch_size'] = {
     'values': [9, 10, 11, 12], 
-    'on': True
+    'default': 10,
+    'on': False
 }
 CONSTS['ebd_dm'] = {
     'values': [48],
@@ -38,9 +50,9 @@ CONSTS['ebd_dm'] = {
 }
 
 CONSTS['l2_regs'] = {
-    'values': [1e-3, 1e-4, 1e-5, 1e-6],
+    'values': [1e-4, 1e-5, 1e-6],
     'depends_on': 'conv_layer_n+2',
-    'on': False
+    'on': True
 }
 
 def coin_toss(p = 0.5):
@@ -66,20 +78,60 @@ SEMI_RANDOM_PARAMS = {
     }
 }
 
-def sample_params(n = 16, semi_random_params_key = 'conv_layer_n'):
-    possibility_n = np.product([len(i['values']) for i in CONSTS.values()])
-    assert n <= possibility_n, "%d <= %d ?" %(n, possibility_n)
-    
+def get_possibility_n():
+    """
+    Get the possibility count of the current configuration
+    """
+    possibility_n = 1
+    params = {}
+    for key in CONSTS:
+        if not CONSTS[key]['on']:
+            assert CONSTS[key].has_key('default'), "if ON is False, then a default must be provided"
+            if CONSTS[key].has_key('default'):
+                CONSTS[key]['values'] = [CONSTS[key].get('default')]
+        
+        depends_on = CONSTS[key].get('depends_on')
+        candidates = CONSTS[key]['values']
+        
+        if depends_on:                
+            if '+' in depends_on: # extra times
+                name, extra_n_str = depends_on.split('+')
+                dup_times = params[name] + int(extra_n_str.strip())
+            else:
+                dup_times = params[depends_on]
+
+            if CONSTS[key].get('repeat'):
+                possibility_n *= len(candidates)
+                params[key] = tuple([random.choice(CONSTS[key]['values'])]) * dup_times
+            else:
+                possibility_n *= (len(candidates) ** dup_times)
+                params[key] = tuple([random.choice(CONSTS[key]['values']) for _ in xrange(dup_times)])
+        else:
+            params[key] = random.choice(CONSTS[key]['values'])
+            possibility_n *= len(candidates)
+
+    return possibility_n
+
+def sample_params(n = None, semi_random_params_key = 'conv_layer_n'):
+    if n is None:
+        n = get_possibility_n()
+    else:
+        possibility_n = get_possibility_n()
+        assert n <= possibility_n, "%d > %d" %(n, possibility_n)
+        
     pool = set()
     samples = []
     i = 0
-    
+
+    sys.stderr.write('total: %d\n' %(get_possibility_n()))
+
     while i < n:
         # random hyper parameters        
         params = {}
         for key in CONSTS:
             if not CONSTS[key]['on']:
-                continue
+                if CONSTS[key].get('default'):
+                    CONSTS[key]['values'] = [CONSTS[key].get('default')]
             
             depends_on = CONSTS[key].get('depends_on')
             value = random.choice(CONSTS[key]['values'])
@@ -103,15 +155,17 @@ def sample_params(n = 16, semi_random_params_key = 'conv_layer_n'):
                     params[key] = value
         
         for key in SEMI_RANDOM_PARAMS:
-            params[key] = SEMI_RANDOM_PARAMS[key][params[semi_random_params_key]]
+            if not (CONSTS.get(key) and CONSTS[key]['on']):
+                params[key] = SEMI_RANDOM_PARAMS[key][params[semi_random_params_key]]
             
         if tuple(params.values()) in pool:
             continue
         else:
             i += 1
+            sys.stderr.write("i = %d: %r\n" %(i, params))
             pool.add(tuple(params.values()))
             samples.append(params)
-
+            
     return samples
 
 def _format_value(v, tuple_sep = ' '):
@@ -122,7 +176,7 @@ def _format_value(v, tuple_sep = ' '):
     else:
         return str(v)
 
-def format_params_to_cmd(name, params, prefix = "python cnn4nlp.py --corpus_path=data/twitter.pkl --model_path=models/twitter.pkl --l2  --norm_w --ebd_delay_epoch=0 --au=tanh"):
+def format_params_to_cmd(name, params, prefix = "python cnn4nlp.py --corpus_path=data/twitter.pkl --model_path=models/twitter.pkl --l2  --norm_w --ebd_delay_epoch=0 --au=tanh --n_epochs=10"):
     params_str = params2str(params)
     sig = params2str(params, cmd_sep = ',,', key_val_sep = '=', tuple_sep = ',', key_prefix = '')
     return "%s %s --img_prefix=%s,,%s"%(
@@ -139,8 +193,11 @@ def params2str(params, cmd_sep = ' ',key_val_sep = ' ', tuple_sep = ' ', key_pre
 if __name__ ==  "__main__":
     import sys
     name = sys.argv[1]
-    
-    possibility_n = np.product([len(v['values']) for k,v in CONSTS.items() if v['on']])
+    if len(sys.argv) > 2:
+        possibility_n = int(sys.argv[2])
+    else:
+        possibility_n = None
+
     # print "possibility_n = %d" %(possibility_n)
     for param in sample_params(possibility_n):
         print format_params_to_cmd(name, param)
