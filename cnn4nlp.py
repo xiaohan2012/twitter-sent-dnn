@@ -657,7 +657,7 @@ def train_and_test(args, print_config):
         )        
     
     #the training loop
-    patience = 10000  # look as this many examples regardless
+    patience = args.patience  # look as this many examples regardless
     patience_increase = 2  # wait this much longer when a new best is
                                   # found
     improvement_threshold = 0.995  # a relative improvement of this much is
@@ -840,16 +840,21 @@ def train_and_test(args, print_config):
                                                   best_validation_loss * 100., best_iter + 1, test_error_val * 100.
                                               )
             )
-        if not args.img_prefix:
+        if not args.task_signature:
             plt.show()
         else:
-            plt.savefig("plots/" + args.img_prefix + ".png")
+            plt.savefig("plots/" + args.task_signature + ".png")
     
     end_time = time.clock()
     
     print(('Optimization complete. Best validation score of %f %% '
            'obtained at iteration %i, with test performance %f %%') %
           (best_validation_loss * 100., best_iter + 1, test_error_val * 100.))
+    
+    # save the result
+    with open(args.output, "a") as f:
+        f.write("%s\t%f\t%f\n" %(args.task_signature, best_validation_loss, test_error_val))
+        
     print >> sys.stderr, ('The code for file ' +
                           os.path.split(__file__)[1] +
                           ' ran for %.2fm' % ((end_time - start_time) / 60.))
@@ -951,7 +956,7 @@ if __name__ == "__main__":
                         help = "Batch size for dev/test data"
     )
     
-    parser.add_argument("--n_epochs", type=int, default =50,
+    parser.add_argument("--n_epochs", type=int, default =20,
                         help = "Maximum number of epochs to perform during training"
     )
     parser.add_argument("--dr", type=float, default = [0.2, 0.5, 0.5], nargs="+",
@@ -974,8 +979,18 @@ if __name__ == "__main__":
     parser.add_argument("--filter_widths", type=int, default = [10,7], nargs="+",
                         help = "Filter width for each conv layer"
     )
-    parser.add_argument("--img_prefix", type=str,
+    parser.add_argument("--task_signature", type=str,
                         help = "The prefix of the saved images."
+    )
+
+    parser.add_argument("--output", type=str,
+                        required = True,
+                        help = "The output file path to save the result"
+    )
+
+    parser.add_argument("--patience", type=int,
+                        default = 5000,
+                        help = "Patience parameter used for early stopping"
     )
     
     args = parser.parse_args(sys.argv[1:])

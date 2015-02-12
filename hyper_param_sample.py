@@ -199,11 +199,14 @@ def _format_value(v, tuple_sep = ' '):
     else:
         return str(v)
 
-def format_params_to_cmd(name, params, prefix = "python cnn4nlp.py --corpus_path=data/twitter.pkl --model_path=models/twitter.pkl --l2  --norm_w --ebd_delay_epoch=0 --au=tanh --n_epochs=12"):
+def format_params_to_cmd(name, params, 
+                         prefix = "python cnn4nlp.py --corpus_path=data/twitter.pkl --l2  --norm_w --ebd_delay_epoch=0 --au=tanh --n_epochs=12", 
+                         more_arguments = {}):
+    arg_str = ' '.join(["--%s %r" %(k, v) for k, v in more_arguments.items()])
     params_str = params2str(params)
     sig = params2str(params, cmd_sep = ',,', key_val_sep = '=', tuple_sep = ',', key_prefix = '')
-    return "%s %s --img_prefix=%s,,%s"%(
-        prefix, params_str, name, sig
+    return "%s %s %s --task_signature=%s,,%s --model_path=models/%s.pkl"%(
+        prefix, arg_str, params_str, name, sig, sig
     )
 
 def params2str(params, cmd_sep = ' ',key_val_sep = ' ', tuple_sep = ' ', key_prefix = '--'):
@@ -215,12 +218,31 @@ def params2str(params, cmd_sep = ' ',key_val_sep = ' ', tuple_sep = ' ', key_pre
     
 if __name__ ==  "__main__":
     import sys
-    name = sys.argv[1]
-    if len(sys.argv) > 2:
-        possibility_n = int(sys.argv[2])
-    else:
-        possibility_n = None
+    import argparse
+    
+    parser = argparse.ArgumentParser(description = "CNN with k-max pooling for sentence classification")
+    
+    parser.add_argument('-n', type=int,
+                        dest = "possibility_n",
+                        required = False,
+                        help = 'How many tasks to sample'
+    )
+    
+    parser.add_argument('--name', type=str,
+                        required = True,
+                        help = 'Task name'
+    )
 
-    # print "possibility_n = %d" %(possibility_n)
-    for param in sample_params(possibility_n):
-        print format_params_to_cmd(name, param)
+    parser.add_argument('--output', type=str,
+                        required = True,
+                        help = 'Where to save the result'
+    )
+
+    args =parser.parse_args()
+
+
+    for param in sample_params(args.possibility_n):
+        print format_params_to_cmd(args.name, 
+                                   param,
+                                   more_arguments = {"output": args.output}
+        )
