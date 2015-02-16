@@ -1,6 +1,6 @@
 # Twitter Sentiment Prediction using Convolutional Neural Network
 
-Author: **Han Xiao** and **Yao Lu**  
+Authors: **Han Xiao** and **Yao Lu**  
 Date: Febaurary, 16, 2015
 
 ## Objective
