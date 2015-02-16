@@ -1,6 +1,6 @@
 # Twitter Sentiment Prediction using Convolutional Neural Network
 
-Author: Han Xiao, Yao Lu
+Author: Han Xiao, Yao Lu  
 Date: Febaurary, 16, 2015
 
 ## Objective
@@ -27,7 +27,7 @@ Two data sources are used to build up this system:
 This data source contains roughly 1.6 million, 872 and 1821 labelled tweets for training, validation and testing respectively. Tweets are givens labels, either *positive* or *negative*. For training data, labelling is done in a automatic way based on emoticons. For example, if the tweet contains a "happy" icon, e.g, *:)*, then it's positive, while in case it contains a "unhappy" one, e.g, *:(*, it's negative. Finally, the emoticons are removed from the tweets. Validation and testing data are manually labelled.
 
 ### Live Twitter data
-<!-- Yao -->
+We provide a script which can crawl tweets which contain sentiment emoticons in real-time. As in the training set, tweets which contain positive emoticons such as :), : ), =), :D and :-) are labeled as positive samples, which contain negative emoticons :(, : (  and :-( are labeled as negative samples and which contain both are removed. The data crawled with this script are in the same format as in the training set.
 
 ## Algorithm
 
