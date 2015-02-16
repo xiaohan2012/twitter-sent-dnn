@@ -52,14 +52,41 @@ CONSTS['ebd_dm'] = {
     'on': True
 }
 
-CONSTS['l2_regs'] = {
+CONSTS['ks'] = {
     'values_at_position': {
-        0: [1e-6, 1e-7]
+        0: [25, 20, 15],
+        1: [8, 5, 2],
     },
-    'values': [1e-4, 1e-5, 1e-6],
-    'depends_on': 'conv_layer_n+2',
+    'depends_on': 'conv_layer_n',
     'on': True
 }
+
+CONSTS['nkerns'] = {
+    'values_at_position': {
+        0: [7, 6, 5],
+        1: [16, 14, 12],
+    },
+    'depends_on': 'conv_layer_n',
+    'on': True
+}
+
+CONSTS['filter_widths'] = {
+    'values_at_position': {
+        0: [9, 8, 7],
+        1: [6, 5, 4],
+    },
+    'depends_on': 'conv_layer_n',
+    'on': True
+}
+
+# CONSTS['l2_regs'] = {
+#     'values_at_position': {
+#         0: [1e-6, 1e-7]
+#     },
+#     'values': [1e-4, 1e-5, 1e-6],
+#     'depends_on': 'conv_layer_n+2',
+#     'on': True
+# }
 
 
 def coin_toss(p = 0.5):
@@ -80,8 +107,9 @@ SEMI_RANDOM_PARAMS = {
         3: (6, 5, 3)
     }, 
     'l2_regs': {
-        2: (1e-6, 3e-5, 3e-5, 1e-4),
-        3: (1e-6, 3e-5, 3e-6, 1e-5, 1e-4),
+        2: (1e-06, 1e-06, 1e-06, 0.0001),
+        # 2: (1e-6, 3e-5, 3e-5, 1e-4),
+        # 3: (1e-6, 3e-5, 3e-6, 1e-5, 1e-4),
     }
 }
 
@@ -98,7 +126,7 @@ def get_possibility_n():
                 CONSTS[key]['values'] = [CONSTS[key].get('default')]
         
         depends_on = CONSTS[key].get('depends_on')
-        candidates = CONSTS[key]['values']
+        candidates = CONSTS[key].get('values', [])
         
         if depends_on:                
             if '+' in depends_on: # extra times
@@ -122,7 +150,8 @@ def get_possibility_n():
                     possibility_n *= (len(candidates) ** (dup_times - len(value_at_positions)))
                 else:
                     possibility_n *= (len(candidates) ** dup_times)
-                params[key] = tuple([random.choice(CONSTS[key]['values']) for _ in xrange(dup_times)])
+                # this might be unnecessary
+                # params[key] = tuple([random.choice(CONSTS[key]['values']) for _ in xrange(dup_times)])
         else:
             params[key] = random.choice(CONSTS[key]['values'])
             possibility_n *= len(candidates)
@@ -152,7 +181,12 @@ def sample_params(n = None, semi_random_params_key = 'conv_layer_n'):
                     CONSTS[key]['values'] = [CONSTS[key].get('default')]
                             
             depends_on = CONSTS[key].get('depends_on')
-            value = random.choice(CONSTS[key]['values'])
+            candidates = CONSTS[key].get('values', [])
+            if candidates:
+                value = random.choice(candidates)
+            else:
+                value = None
+
             if depends_on:                
                 if '+' in depends_on: # extra times
                     name, extra_n_str = depends_on.split('+')
@@ -161,14 +195,19 @@ def sample_params(n = None, semi_random_params_key = 'conv_layer_n'):
                     dup_times = params[depends_on]
 
                 if CONSTS[key].get('repeat'):
+                    assert value is not None
                     params[key] = tuple([value]) * dup_times
                 else:
-                    params[key] = tuple([random.choice(CONSTS[key]['values']) for _ in xrange(dup_times)])
+                    if candidates:
+                        params[key] = tuple([random.choice(candidates) for _ in xrange(dup_times)])
+                    else:
+                        params[key] = tuple(range(dup_times)) # fake values to be replaced
             else:
                 if isinstance(value, bool): #it's bool, show or hide
                     if value:
                         params[key] = value
                 else:
+                    assert value is not None
                     params[key] = value
             
             # remedy step that changes the value at specific positions
@@ -178,7 +217,7 @@ def sample_params(n = None, semi_random_params_key = 'conv_layer_n'):
                 params[key] = modify_tuple(params[key], positions, values)
 
         for key in SEMI_RANDOM_PARAMS:
-            if not (CONSTS.get(key) and CONSTS[key]['on']):
+            if not (CONSTS.get(key) and CONSTS[key]['on']): #it's not used for sampling
                 params[key] = SEMI_RANDOM_PARAMS[key][params[semi_random_params_key]]
             
         if tuple(params.values()) in pool:
@@ -200,7 +239,7 @@ def _format_value(v, tuple_sep = ' '):
         return str(v)
 
 def format_params_to_cmd(name, params, 
-                         prefix = "python cnn4nlp.py --corpus_path=data/twitter.pkl --l2  --norm_w --ebd_delay_epoch=0 --au=tanh --n_epochs=12", 
+                         prefix = "python dcnn_train.py --corpus_path=data/twitter.pkl --l2  --norm_w --ebd_delay_epoch=0 --au=tanh --n_epochs=12", 
                          more_arguments = {}):
     arg_str = ' '.join(["--%s %r" %(k, v) for k, v in more_arguments.items()])
     params_str = params2str(params)
@@ -246,3 +285,4 @@ if __name__ ==  "__main__":
                                    param,
                                    more_arguments = {"output": args.output}
         )
+        
