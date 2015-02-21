@@ -1,0 +1,95 @@
+3. when using cross entropy cost function, should the labels be encoded in binary?
+5. larger pretraining dataset
+
+8. early stopping onece other parameters are fixed
+9. momentum
+10. penalize the bias?
+12. why use tanh, why use rectifier?
+
+2. visualizing word embedding
+3. Hinton diagrams
+
+Further:
+1. Change how the folding works
+2. Change the pooling stategy, instead of pooling on 1D, pool on 2D.
+
+
+MAIN PARAMETERS:
+
+MINI-BATCH SIZE: 3
+
+REGULARIZATION TERM:
+1e-4, 3e-5, 3e-6, 1e-5, 1e-4
+
+CONV LAYER PARAMETERS(nkern, k, feat_map_n)
+
+top pooling size: 2
+
+kernals/filter width: 6 5 3
+
+feat_map_n: 3 4 2
+
+folding: turned off
+
+DROPOUT:
+
+all on and all set to 0.5
+
+EMBEDDING_LEARNING
+it's not delayed. it's stopped after certain epochs
+
+
+# ROUND ONE
+
+Variables: 
+ - Folding: ON or OFF.
+ - Conv layer number: 2 or 3
+ - Mini-batch size: 9, 10, 11 or 12.
+
+For twitter data, **folding** should be turned ON as in that case, the learning curve is much stable. Does this give sign that we can make some progress on the folding par
+
+And conv layer number and mini-batch size does not show much difference.
+
+# ROUND TWO
+
+Variables:
+l2_regs: [1e-4, 1e-5, 1e-6]
+
+Constants:
+ - Folding: ON
+ - Conv layer number: 2
+ - Mini-batch-size: 10
+
+Conclusion:
+
+- regularizing term for embedding set to 1e-6(smaller than the other as it contains more entries)
+- For the rest three regularing terms:
+  4,5,6 => 18.2%3 and 18.01%
+  4,6,5 => 17.09% and 17.57%
+  5,5,6 => 17.20% and 18.01%
+  6,4,4 => 18.00% and 18.12%
+  6,6,6 => 18.02% and 18.07%
+
+  6,5,4 => 19.03% and 19.38%
+  5,4,5 => 18.57% and 19.71%
+  5,4,6 => 19.84% and 18.89%
+  6,4,6 => 18.92% and 19.54%
+  
+No obvious pattern..
+
+# ROUND THREE
+Grid search is performed on varied l2 regularizer parameters.
+
+1. Embedding penalty parameter is chosen from {1e-6, 1e-7}.
+2. For the rest of three layers, the parameter is chosen from {1e-4, 1e-5, 1e-6}.
+
+This results in a total of 54 possibilities.
+
+The best configuration is 1e-06, 1e-06, 1e-06, 0.0001.
+
+Dev error: 0.161697
+Test error: 0.165843
+
+# ROUND FOUR
+
+Penalty parameter set to 1e-06, 1e-06, 1e-06, 0.0001.
