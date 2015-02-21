@@ -98,9 +98,9 @@ p = Params()
 p.embeddings = embeddings
 p.conv_layer_n = 1
 p.ks = [3]
-p.fold_flags = [1]
-p.Ws = [W]
-p.bs = [b]
+p.fold = [1]
+p.W = [W]
+p.b = [b]
 p.W_logreg = W_logreg
 p.b_logreg = b_logreg
 
@@ -108,7 +108,7 @@ dcnn = DCNN(p)
 
 ##################### Testing ####################
 
-from test_util import assert_matrix_eq
+from test_util import (assert_matrix_eq, assert_about_eq)
 
 x = np.asarray(np.random.randint(vocab_size, size = (3, 6)),
                dtype=np.int32
@@ -133,15 +133,15 @@ assert_matrix_eq(actual, expected, "Conv")
 ########## Output layer ###################
 actual = dcnn._p_y_given_x(x)
 expected = f3(x)
+assert_matrix_eq(actual, expected, "p_y_given_x")
 
 
-print "Actual:"
-print actual
-print "Expected:"
-print expected
-assert (np.abs(actual - expected) < 1e-5).all()
-
-actual = dcnn._error(x, y)
+########## errors ###########
+actual = dcnn._errors(x, y)
 expected = f2(x, y)
+assert_about_eq(actual, expected, "errors")
 
-assert (np.abs(actual - expected) < 1e-5).all()
+########## nnl ###########
+actual = dcnn._nnl(x, y)
+expected = f1(x, y)
+assert_about_eq(actual, expected, "nnl")

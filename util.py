@@ -433,7 +433,24 @@ def dump_params(params, path):
     data = [(param.name, param.get_value())
             for param in params]
     pickle.dump(data, open(path, "w"))
+
+
+def modify_tuple(obj, positions, new_values):
+    """
+    Modify the tuple object at certain positions by certain value
     
+    >>> modify_tuple((1,2,3), [0,1,2], [3,2,1])
+    (3, 2, 1)
+    """
+    assert isinstance(obj, tuple)
+    assert len(positions) == len(new_values)
+
+    alt = list(obj)
+    for pos, val in zip(positions, new_values):
+        alt[pos] = val
+        
+    return tuple(alt)
+
 if __name__ == "__main__":
     # process_stanford_sentiment_corpus('data/stanfordSentimentTreebank/trees/train.txt', 
     #                                   'data/stanfordSentimentTreebank/trees/dev.txt', 

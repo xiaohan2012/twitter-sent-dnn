@@ -63,13 +63,6 @@ class LogisticRegression(object):
         return T.mean(
             -T.log(self.p_y_given_x[T.arange(y.shape[0]), y])
         )
-
-    def cross_ent(self, y):
-        """
-        Cross entropy
-        y: the correct label
-        """
-        # return T.
         
     def errors(self, y):
         """

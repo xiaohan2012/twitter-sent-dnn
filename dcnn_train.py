@@ -1,6 +1,8 @@
 """
-CNN for sentence modeling described in:
+CNN for sentence modeling described in paper:
+
 A Convolutional Neural Network for Modeling Sentence
+
 """
 import sys, os, time
 import pdb
@@ -82,7 +84,7 @@ class ConvFoldingPoolLayer(object):
                  input,
                  filter_shape,
                  k,
-                 activation,
+                 activation = "tanh",
                  norm_w = True,
                  fold = 0,
                  W = None,
@@ -214,7 +216,7 @@ class ConvFoldingPoolLayer(object):
         # non-linear transform of the convolution output
         conv_out = T.nnet.conv.conv2d(self.input, 
                                       self.W, 
-                                      border_mode = "full")             
+                                      border_mode = "full")
 
         if self.fold_flag:
             # fold
@@ -225,8 +227,6 @@ class ConvFoldingPoolLayer(object):
         # k-max pool        
         pool_out = (self.k_max_pool(fold_out, self.k) + 
                     self.b.dimshuffle('x', 0, 'x', 'x'))
-        
-        # pool_out = theano.printing.Print("pool_out, self.k: %d" %self.k)(pool_out)
         
         # around 0.
         # why tanh becomes extreme?
@@ -257,7 +257,6 @@ class DropoutLayer(object):
                              size=input.shape)
 
         self.output = input * T.cast(mask, theano.config.floatX)
-
 
 def train_and_test(args, print_config):
 
@@ -292,12 +291,11 @@ def train_and_test(args, print_config):
     # Symbolic variable definition    #
     ###################################
     x = T.imatrix('x') # the word indices matrix
-    sent_len = x.shape[1]
     y = T.ivector('y') # the sentiment labels
 
     batch_index = T.iscalar('batch_index')
     
-    rng = np.random.RandomState(1234)        
+    rng = np.random.RandomState(1234)
     
     ###############################
     # Construction of the network #
@@ -337,8 +335,6 @@ def train_and_test(args, print_config):
         )
         
         k = args.ks[i]
-        # k = int(max(k_top, 
-        #             math.ceil((conv_layer_n - float(i+1)) / conv_layer_n * train_sent_len)))
         
         print "For conv layer(%s) %d, filter shape = %r, k = %d, dropout_rate = %f and normalized weight init: %r and fold: %d" %(
             args.conv_activation_unit, 

@@ -2,7 +2,7 @@ import theano
 import numpy as np
 from dcnn import WordEmbeddingLayer
 from dcnn_train import WordEmbeddingLayer as TheanoWordEmbeddingLayer
-
+from test_util import assert_matrix_eq
 ########### NUMPY ###########
 
 vocab_size, embed_dm = 10, 5
@@ -33,4 +33,5 @@ f = theano.function(inputs = [x_symbol],
 
 expected = f(sents)
 
-assert np.all(expected == actual)
+assert_matrix_eq(actual, expected, "Embedding")
+

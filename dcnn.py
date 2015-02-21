@@ -124,7 +124,7 @@ class LogisticRegression(object):
 
         :type b: numpy.ndarray
         :param b:
-
+n
         """
         assert W.shape[1] == b.shape[0]
         assert W.ndim == 2
@@ -167,19 +167,19 @@ class LogisticRegression(object):
         
 class DCNN(object):
     def __init__(self, params):
-        self.e_layer = WordEmbeddingLayer(embeddings = params.embeddings )
+        self.e_layer = WordEmbeddingLayer(embeddings = params.embeddings)
         self.c_layers = []
         
         for i in xrange(params.conv_layer_n):
             self.c_layers.append(ConvFoldingPoolLayer(params.ks[i],
-                                                      params.fold_flags[i],
-                                                      W = params.Ws[i],
-                                                      b = params.bs[i])
+                                                      params.fold[i],
+                                                      W = params.W[i],
+                                                      b = params.b[i])
             )
 
         self.l_layer = LogisticRegression(
-            params.W_logreg,
-            params.b_logreg
+            params.logreg_W,
+            params.logreg_b
         )
 
     def _p_y_given_x(self, x):
@@ -196,9 +196,11 @@ class DCNN(object):
         return self.l_layer._p_y_given_x(output)
 
     def predict(self, x):
-        return np.argmax(self._p_y_given_x(self, x), axis = 1)
+        return np.argmax(self._p_y_given_x(x), axis = 1)
  
-    # The following functions are for testing purpose               
+    # The following functions are 
+    # FOR TESTING PURPOSE               
+    #
     def _nnl(self, x, y):
         p_y_given_x = self._p_y_given_x(x)
         return np.mean(
@@ -206,11 +208,10 @@ class DCNN(object):
         )
 
     def _errors(self, x, y):
-        assert y.dtype == np.int32
+        assert y.dtype == np.int32, "%r != %r" %(y.dtype, np.int32)
         pred_y = self.predict(x)
         return np.sum(pred_y != y) / float(pred_y.shape[0])
 
-        
 
     def _c_layer_output(self, x):
         output = self.e_layer.output(x)

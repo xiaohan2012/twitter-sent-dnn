@@ -5,6 +5,8 @@ from dcnn import LogisticRegression
 
 from logreg import LogisticRegression as TheanoLogisticRegression
 
+from test_util import assert_matrix_eq
+
 #########################
 # NUMPY PART
 #########################
@@ -44,7 +46,8 @@ f1 = theano.function(inputs = [x_symbol, y_symbol],
 actual = np_l.nnl(x, y)
 expected = f1(x, y)
 
-assert (np.abs(actual - expected) < 1e-5).all()
+
+assert_matrix_eq(actual, expected, "nnl")
 
 
 f2 = theano.function(inputs = [x_symbol, y_symbol], 
@@ -54,4 +57,4 @@ f2 = theano.function(inputs = [x_symbol, y_symbol],
 actual = np_l.errors(x, y)
 expected = f2(x, y)
 
-assert (np.abs(actual - expected) < 1e-5).all()
+assert_matrix_eq(actual, expected, "errors")

@@ -2,6 +2,8 @@ import numpy as np
 
 from numpy_impl import conv2d
 
+from test_util import assert_matrix_eq
+
 ########################
 # Numpy part #
 ########################
@@ -34,4 +36,5 @@ f = theano.function(inputs = [input_feature_map_sym, filters_sym],
 theano_output = f(input_feature_map, filters)
 print theano_output
 
-print "Equivalence result:", (numpy_output == theano_output).all()
+
+assert_matrix_eq(numpy_output, theano_output, "Conv2d")
