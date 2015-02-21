@@ -54,3 +54,5 @@ docs/_build/
 target/
 
 *~
+
+venv/
