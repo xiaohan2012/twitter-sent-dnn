@@ -4,6 +4,8 @@ import tornado.template
 import tweepy
 import numpy as np
 
+from sentiment import (sentiment_scores_of_sents, sentiment_score)
+
 html = """
 <!DOCTYPE html>
 <html>
@@ -99,16 +101,21 @@ class MainHandler(tornado.web.RequestHandler):
         t = tornado.template.Template(html)
 
 	if tweet:
-	    index = np.random.randn()
-            self.write(t.generate(tweet_senti=str(index), hashtag_senti="0"))
+	    score = sentiment_scores(tweet.text)
+            self.write(t.generate(tweet_senti=str(score), hashtag_senti="0"))
 	elif hashtag:
+            
     	    tweets = api.search(hashtag, count=100)
-	    tweets_text = [tt.text for tt in tweets]
-	    index = np.random.randn()
-            self.write(t.generate(tweet_senti="0", hashtag_senti=str(index)))
+            tweets = [tweet.text for tweet in tweets]
+            scores = sentiment_scores_of_sents(tweets)
+            for score, tweet in zip(scores, tweets):
+                print score, tweet
+
+            mean_score = np.mean(scores)
+            
+            self.write(t.generate(tweet_senti="0", hashtag_senti=str(mean_score)))
 	else:
             self.write(t.generate(tweet_senti="0", hashtag_senti="0"))
-
 
 
 application = tornado.web.Application([(r"/", MainHandler)], autoreload=True)
