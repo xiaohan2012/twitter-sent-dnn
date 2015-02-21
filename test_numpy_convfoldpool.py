@@ -1,57 +1,24 @@
 import theano
 import numpy as np
 from dcnn import ConvFoldingPoolLayer
+from test_util import assert_matrix_eq
 
 #########################
 # NUMPY PART
 #########################
-W = np.asarray([
-    [ #1st filter
-        [[0, 0],
-         [0, 1]], # 1->1
-        [[0, 1],
-         [0, 0]] # 1->2
-    ], 
-    [ #2nd filter
-        [[1, 0],
-         [0, 0]], # 2->1
-        [[0, 0],
-         [1, 0]] # 2->2
-    ],
-    [  #3rd filter
-        [[1, 1],
-         [0, 0]], # 3->1
-        [[0, 0],
-         [1, 1]] # 3->2
-    ]
-], dtype=theano.config.floatX)
-
 filter_shape = (3, 2, 2, 2)
-
-b = np.array([1, 1, 1])
+W = np.asarray(np.random.rand(3, 2, 2, 2), 
+               dtype=theano.config.floatX)
+b = np.asarray(np.random.rand(3), 
+               dtype=theano.config.floatX)
 k = 4
 fold = False
-layer = ConvFoldingPoolLayer(k = k,
-                             fold = fold,
-                             W = W,
-                             b = b)
+np_layer = ConvFoldingPoolLayer(k = k,
+                                fold = fold,
+                                W = W,
+                                b = b)
 
-x = np.asarray([
-    [
-        [
-            [1, 1, 1], 
-            [2, 2, 2], 
-            [3, 3, 3]
-        ],
-        [
-            [1, 1, 1], 
-            [2, 2, 2], 
-            [3, 3, 3]
-        ]
-    ]
-], dtype=theano.config.floatX)
 
-actual = layer.output(x)
 
 
 #########################
@@ -80,9 +47,13 @@ layer = TheanoConvFoldingPoolLayer(rng = np.random.RandomState(1234),
 f = theano.function(inputs = [x_symbol], 
                     outputs = layer.output)
 
+
+########## Test ################
+
+x = np.asarray(np.random.rand(2,2,3,3), 
+               dtype=theano.config.floatX)
+
+actual = np_layer.output(x)
 expected = f(x)
 
-print expected
-print actual
-
-print "Test successful?", (actual == expected).all()
+assert_matrix_eq(actual, expected, "Conv")

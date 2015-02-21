@@ -1,34 +1,36 @@
+import theano
 import numpy as np
 from dcnn import WordEmbeddingLayer
+from dcnn_train import WordEmbeddingLayer as TheanoWordEmbeddingLayer
 
-# 5 x 3 embedding for test
-embedding = np.arange(15).reshape((5,3))
-embedding_layer = WordEmbeddingLayer(embedding)
-sents = np.array([
-    [0, 1, 2], 
-    [1, 2, 3]
-])
+########### NUMPY ###########
 
-expected = [
-    [
-        np.transpose(np.array(
-            [
-                [0,1,2], 
-                [3,4,5], 
-                [6,7,8]
-            ]))
-    ],
-    [
-        np.transpose(np.array(
-            [
-                [3,4,5], 
-                [6,7,8], 
-                [9, 10, 11]
-            ]))
-    ]
-]
+vocab_size, embed_dm = 10, 5
+embeddings = np.random.rand(vocab_size, embed_dm)
+sents = np.asarray(np.random.randint(10, size = (3, 6)), 
+                   dtype = np.int32)
 
-actual = embedding_layer.output(sents)
+
+np_l = WordEmbeddingLayer(embeddings)
+
+actual = np_l.output(sents)
+
+########### THEANO ###########
+
+x_symbol = theano.tensor.imatrix('x') # the word indices matrix
+
+th_l = TheanoWordEmbeddingLayer(rng = np.random.RandomState(1234), 
+                                input = x_symbol, 
+                                vocab_size = vocab_size,
+                                embed_dm = embed_dm, 
+                                embeddings = theano.shared(value = embeddings, 
+                                                           name = "embeddings"
+                                                       )
+                            )
+
+f = theano.function(inputs = [x_symbol], 
+                    outputs = th_l.output)
+
+expected = f(sents)
 
 assert np.all(expected == actual)
-
