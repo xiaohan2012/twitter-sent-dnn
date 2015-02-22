@@ -18,8 +18,8 @@ Please refer to [A Convolutional Neural Network for Modelling Sentences](http://
 ## Technical choices
 
 - [Tornado](http://www.tornadoweb.org/en/stable/) as the web framework
-- [Theano](http://deeplearning.net/software/theano/) as the backend deep neural network implementation
-- [MySQL](http://www.mysql.com/) as the data storage
+- [Theano](http://deeplearning.net/software/theano/) as the neural network training implementation
+- [Scipy](http://www.scipy.org/) as the neural network classification(online version) implementation
 
 ## Training techniques
 
