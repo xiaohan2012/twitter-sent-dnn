@@ -56,3 +56,5 @@ target/
 *~
 
 venv/
+models/
+data/
