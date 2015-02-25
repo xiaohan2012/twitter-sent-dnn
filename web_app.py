@@ -1,6 +1,8 @@
+import os
 import tornado.ioloop
 import tornado.web
 import tornado.template
+import tornado.httpserver
 import tweepy
 import numpy as np
 
@@ -118,10 +120,15 @@ class MainHandler(tornado.web.RequestHandler):
             self.write(t.generate(tweet_senti="0", hashtag_senti="0"))
 
 
-application = tornado.web.Application([(r"/", MainHandler)], autoreload=True)
+def main():
+    application = tornado.web.Application([(r"/", MainHandler)])
+    http_server = tornado.httpserver.HTTPServer(application)
+    port = int(os.environ.get("PORT", 5000))
+    http_server.listen(port)
+    tornado.ioloop.IOLoop.instance().start()
+
 
 if __name__ == "__main__":
-    application.listen(8888)
-    tornado.ioloop.IOLoop.instance().start()
+    main()
     
 
