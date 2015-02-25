@@ -1,16 +1,18 @@
 # twitter-sent-dnn
-Deep Neural Network(DNN) for Sentiment Analysis on Twitter
-
-## Contributors
-Han Xiao and Yao Lu
+Twitter Sentiment Analysis using Convolutional Neural Network(CNN)
 
 ## What is it
 
 A web app that allows to:
 
-- gain an overview of the "goodness" of [hashtags](https://support.twitter.com/articles/49309-using-hashtags-on-twitter#) in terms of twitter user opinion
+- predict sentiment "positiveness" for tweets
+- gain an overview of the "positiveness" of [hashtags](https://support.twitter.com/articles/49309-using-hashtags-on-twitter#)
 
-## DNN algorithm
+## Demo
+
+Click [here](https://twitter-sentiment-cnn.herokuapp.com/)
+
+## Algorithm
 
 
 Please refer to [A Convolutional Neural Network for Modelling Sentences](http://nal.co/papers/Kalchbrenner_DCNN_ACL14) for more information about the algorithm.
@@ -27,3 +29,5 @@ Please refer to [A Convolutional Neural Network for Modelling Sentences](http://
 2. Dropout
 3. AdaDelta
 
+## Contributors
+Han Xiao and Yao Lu
