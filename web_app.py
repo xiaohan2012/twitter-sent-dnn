@@ -103,7 +103,7 @@ class MainHandler(tornado.web.RequestHandler):
         t = tornado.template.Template(html)
 
 	if tweet:
-	    score = sentiment_scores(tweet.text)
+	    score = sentiment_score(tweet)
             self.write(t.generate(tweet_senti=str(score), hashtag_senti="0"))
 	elif hashtag:
             
@@ -111,7 +111,7 @@ class MainHandler(tornado.web.RequestHandler):
             tweets = [tweet.text for tweet in tweets]
             scores = sentiment_scores_of_sents(tweets)
             for score, tweet in zip(scores, tweets):
-                print score, tweet
+                print score, tweet.encode('utf8')
 
             mean_score = np.mean(scores)
             
