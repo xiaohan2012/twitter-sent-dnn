@@ -14,7 +14,7 @@ The Web application is implemented using Tornado and a pre-trained Convolutional
 
 ## System architecture
 
-![Architecture](http://s15.postimg.org/p8rf5mnqj/twitter_sent_cnn_infra.png)
+![Architecture](http://s14.postimg.org/ofb5250ip/twitter_sent_cnn_infra.png)
 
 As seen in the figure above, we deployed our App on [Heroku](https://www.heroku.com/) and used [Tornado](http://www.tornadoweb.org/en/stable/) as the Web server. For the sentiment prediction backend, [Scipy](http://www.scipy.org/) is used. Model training is done offline using [Theano](deeplearning.net/software/theano/).
 
@@ -66,7 +66,7 @@ The final set of hyper-parameters achieving the empirical best results are as fo
 
 1. *batch size*: 10
 2. *convolution layer number*: 2
-3. *k values*: 20,8 (values correspondence are from **bottom to** top  layers, applies to the following entries)
+3. *k values*: 20,8 (values correspondence are from **bottom to top**  layers, applies to the following entries)
 4. *filter width*: 8,6
 5. *L2 regularizer parameter*: 1e-06,1e-06,1e-06,0.0001
 6. *feature map number*: 0.5,0.5
