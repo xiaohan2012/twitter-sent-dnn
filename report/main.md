@@ -16,7 +16,7 @@ The Web application is implemented using Tornado and a pre-trained Convolutional
 
 ![Architecture](http://s14.postimg.org/ofb5250ip/twitter_sent_cnn_infra.png)
 
-As seen in the figure above, we deployed our App on [Heroku](https://www.heroku.com/) and used [Tornado](http://www.tornadoweb.org/en/stable/) as the Web server. For the sentiment prediction backend, [Scipy](http://www.scipy.org/) is used. Model training is done offline using [Theano](deeplearning.net/software/theano/).
+As seen in the Figure 1, we deployed our App on [Heroku](https://www.heroku.com/) and used [Tornado](http://www.tornadoweb.org/en/stable/) as the Web server. For the sentiment prediction backend, [Scipy](http://www.scipy.org/) is used. Model training is done offline using [Theano](deeplearning.net/software/theano/).
 
 ## Data
 

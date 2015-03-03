@@ -12,6 +12,6 @@ servers=$(<servers.lst)
 echo "SERVERS TO DEPLOY: "
 echo $servers
 
-cat $cmd_file | parallel  --progress -S  $servers  --workdir . --tmpdir parallel_output --files  --jobs 5
+cat $cmd_file | parallel  --progress -S  $servers  --workdir . --tmpdir parallel_output --files  --jobs 6
 
 
