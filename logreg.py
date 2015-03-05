@@ -3,7 +3,11 @@ import theano.tensor as T
 import numpy as np
 
 class LogisticRegression(object):
-    def __init__(self, rng, input, n_in, n_out,
+    def __init__(self, 
+                 rng, 
+                 input, 
+                 n_in, 
+                 n_out,
                  W = None,
                  b = None
     ):
