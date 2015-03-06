@@ -28,6 +28,7 @@ from recnn import RNTNLayer as NumpyRNTNLayer
 numpy_l = NumpyRNTNLayer(theano_l.V.get_value(), theano_l.W.get_value())
 
 actual = numpy_l.output(left_input, right_input)
+actual1 = numpy_l.output(np.squeeze(left_input), np.squeeze(right_input)) #passing 1d array
 
 ################
 # THEANO PART  #
@@ -44,4 +45,5 @@ f = theano.function(
 expected = f(left_input, right_input)
 
 assert_matrix_eq(actual, expected, "output")
+assert_matrix_eq(actual1, expected, "output(1d passed in)")
 

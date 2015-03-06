@@ -135,7 +135,7 @@ class RNTN(object):
             borrow = True,
         )        
         
-        rntn_layer = RNTNLayer(rng, embed_dim)
+        self.rntn_layer = RNTNLayer(rng, embed_dim)
 
         # Update the embedding by
         # forwarding the embedding from bottom to up
@@ -149,7 +149,7 @@ class RNTN(object):
             return T.switch(T.eq(child_indices[0], -1), # NOTE: not using all() because it's non-differentiable
                             embedding, # if no child, return the word embedding
                             T.set_subtensor(embedding[my_index], # otherwise, compute the embedding of RNTN layer
-                                            rntn_layer.output(embedding[child_indices[0]], 
+                                            self.rntn_layer.output(embedding[child_indices[0]], 
                                                               embedding[child_indices[1]])
                                             # embedding[child_indices[0]] + embedding[child_indices[1]]
                                         )
@@ -167,15 +167,15 @@ class RNTN(object):
                                                             T.set_subtensor(self.embedding[parent_ids], final_embedding[-1][parent_ids]))])
 
         # the logistic regression layer that predicts the label
-        logreg_layer = LogisticRegression(rng, 
+        self.logreg_layer = LogisticRegression(rng, 
                                           input = final_embedding[-1][parent_ids], 
                                           n_in = embed_dim,
                                           n_out = label_n
         )
         
-        self.cost = logreg_layer.nnl(y)
+        self.cost = self.logreg_layer.nnl(y)
 
-        self.params = [logreg_layer.W, logreg_layer.b, rntn_layer.V, rntn_layer.W, self.embedding]
+        self.params = [self.logreg_layer.W, self.logreg_layer.b, self.rntn_layer.V, self.rntn_layer.W, self.embedding]
         self.grads = [T.grad(cost = self.cost, wrt=p) for p in self.params]
         
         # TODO: in this step, forward propagation is done again besides the one in `update_embedding`

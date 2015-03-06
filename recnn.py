@@ -28,7 +28,7 @@ class RNTNLayer(object):
         assert V.ndim == 3
         assert W.ndim == 2
         
-        assert V.shape[1] == V.shape[2]
+        assert V.shape[1] == V.shape[2], "%r" %(V.shape)
         assert V.shape[0] == W.shape[0]
         assert V.shape[1] == W.shape[1]
         
@@ -56,11 +56,11 @@ class RNTNLayer(object):
         # if left_input and right_input are 1d array
         # make it a 2D row 
         if left_input.ndim == 1: 
-            left_input = left_input[None,0]
+            left_input = left_input[np.newaxis,:]
 
         if right_input.ndim == 1:
-            right_input = right_input[None,0]
-            
+            right_input = right_input[np.newaxis,:]
+        
         concat_vec = np.concatenate(
             [left_input, right_input],
             axis = 1
@@ -68,3 +68,28 @@ class RNTNLayer(object):
         
         result = np.tanh(np.dot(concat_vec, np.tensordot(self.V, np.transpose(concat_vec), [2, 0])) + np.dot(self.W, np.transpose(concat_vec)))
         return result.squeeze()
+
+class RNTN(object):
+    def __init__(self, embedding, rntn_layer, logreg_layer, word2id):
+        self.embedding = embedding
+        self.rntn_layer = rntn_layer
+        self.logreg_layer = logreg_layer
+        self.word2id = word2id
+
+    def get_node_vector(self, node):
+        if isinstance(node, tuple): # is internal node
+            assert len(node) == 3
+            left_node_vector = self.get_node_vector(node[1])
+            right_node_vector = self.get_node_vector(node[2])
+            return self.rntn_layer.output(left_node_vector, right_node_vector)
+        else:
+            assert isinstance(node, basestring)
+            idx = (self.word2id[node] 
+                   if node in self.word2id 
+                   else self.word2id["<UNK>"])
+            
+            return self.embedding[idx]
+
+    def predict(self, node):
+        vec = self.get_node_vector(node)
+        return self.logreg_layer.predict(vec)

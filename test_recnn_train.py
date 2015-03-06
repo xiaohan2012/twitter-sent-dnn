@@ -38,13 +38,6 @@ classifier = RNTN(
     label_n = 5,
 )
 
-# original_embedding = classifier.last_embedding.get_value()
-
-# get_embedding = theano.function(
-#     inputs = [x],
-#     outputs = classifier.embedding
-# )
-
 x_input = np.asarray([[1,-1,-1],
                       [2,-1,-1],
                       [3, 1, 2]],
