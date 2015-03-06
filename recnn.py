@@ -105,89 +105,84 @@ class RNTN(object):
     Recursive Neural Tensor Network architecture
     """
     
-    def __init__(self, tree_matrix, labels, vocab_size, embed_dim, label_n):
+    def __init__(self, x, y, vocab_size, embed_dim, label_n):
         """
-    
-        tree_matrix: numpy.array, 
-            the tree matrix
-            row: the ith tree node
-            column: length 2, the left child phrase id, the right child phrase id, 
-                    value is -1 if it has no child(single word case)
+        x: theano.tensor.imatrix, (minibatch size, 3)
+            the tree matrix of the minibatch
+            for each row, (node id, left child id, right child id)
 
-        labels: numpy.array
-            labels, column/row vector denoting the corresponding sentiment label
+        y: theano.tensor.ivector, (minibatch size,)
+            the labels
 
         vocab_size: int
-            vocabulary size
+            vocabulary size, including both the words and phrases
         
         embed_dim: int
             the embedding dimension
 
         """
-        children_indices = theano.shared(value = tree_matrix, 
-                                         name = "children_indices", 
-                                         borrow = True)
+        assert x.ndim == 2
+        assert y.ndim == 1
         
-        phrase_number = tree_matrix.shape[0]
-
-        phrase_indices = theano.shared(value = np.arange(vocab_size,
-                                                         vocab_size + phrase_number),
-                                       name = "phrase_indices", 
-                                       borrow = True)                
+        parent_ids = x[:,0]
+        children_ids = x[:,1:]
+        
         rng = np.random.RandomState(1234)     
-        
-        word_embedding = theano.shared(
+
+        self.embedding = theano.shared(
             value = rng.normal(0, 0.05, (vocab_size, embed_dim)),
-            name = 'word_embedding',
+            name = 'embedding',
             borrow = True,
-        )        
-        
-        phrase_embedding = theano.shared(
-            value = np.asarray(
-                np.zeros(
-                    (phrase_number,
-                     embed_dim)
-                ),
-                dtype = theano.config.floatX
-            ),
-            name = "phrase_embedding",
-            borrow = True
         )        
         
         rntn_layer = RNTNLayer(rng, embed_dim)
 
-        # forward the embedding from bottom to up
-        # and get the vector for each node in each tree
-        def update_embedding(child_indices, my_index, output_model):
-            left_child_embedding = output_model[child_indices[0]]
-            right_child_embedding = output_model[child_indices[1]]
-            
-            parent_embedding = rntn_layer.output(left_child_embedding, 
-                                                 right_child_embedding)
-            
-            return T.set_subtensor(output_model[my_index], parent_embedding)
+        # Update the embedding by
+        # forwarding the embedding from bottom to up
+        # and getting the vector for each node in each tree
+        
+        def update_embedding(child_indices, my_index, embedding):
+            assert child_indices.ndim == 1
+            assert my_index.ndim == 0
+
+            return T.switch(T.eq(child_indices[0], -1), # NOTE: not using all() because it's non-differentiable
+                            embedding, # if no child, return the word embedding
+                            T.set_subtensor(embedding[my_index], # otherwise, compute the embedding of RNTN layer
+                                            rntn_layer.output(embedding[child_indices[0]], 
+                                                              embedding[child_indices[1]])
+                                            # embedding[child_indices[0]] + embedding[child_indices[1]]
+                                        )
+            )
             
         final_embedding, updates = theano.scan(
             fn = update_embedding, 
-            sequences = [children_indices, phrase_indices],
-            outputs_info = T.concatenate([word_embedding, phrase_embedding], 
-                                         axis = 0),
-            n_steps = children_indices.shape[0]
+            sequences = [children_ids, parent_ids],
+            outputs_info = self.embedding, # we should pass the whole matrix and fill in the positions if necessary
         )
+                
+
+        self.update_embedding = theano.function(inputs = [x], 
+                                                updates = [(self.embedding, 
+                                                            T.set_subtensor(self.embedding[parent_ids], final_embedding[-1][parent_ids]))])
 
         # the logistic regression layer that predicts the label
-        
         logreg_layer = LogisticRegression(rng, 
-                                          input = final_embedding[-1], 
+                                          input = final_embedding[-1][parent_ids], 
                                           n_in = embed_dim,
                                           n_out = label_n
         )
         
-        self.final_embedding = final_embedding[-1]
+        self.cost = logreg_layer.nnl(y)
+
+        self.params = [logreg_layer.W, logreg_layer.b, rntn_layer.V, rntn_layer.W, self.embedding]
+        self.grads = [T.grad(cost = self.cost, wrt=p) for p in self.params]
+
         
-        assert self.final_embedding.ndim == 2
-        
-        self.cost = logreg_layer.nnl(labels)
+        # TODO: in this step, forward propagation is done again besides the one in `update_embedding`
+        #       this extra computation should be avoided
+        self.train = theano.function(inputs = [x, y], 
+                                     updates = [(p, p - 10*g) 
+                                                for p,g in zip(self.params, self.grads)])
 
 def main():
     # load data

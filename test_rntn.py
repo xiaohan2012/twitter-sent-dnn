@@ -1,6 +1,7 @@
 import numpy as np
 from recnn import RNTNLayer
 import theano
+from test_util import assert_matrix_eq
 
 V_val = np.asarray((np.arange(3*6*6) / 100).reshape((3,6,6)), dtype=theano.config.floatX)
 W_val = np.asarray((np.arange(3*6) / 100).reshape((3,6)), dtype=theano.config.floatX)
@@ -49,6 +50,5 @@ f = theano.function(
 
 actual = f(left_input, right_input)
 
-
-assert (np.abs(actual - expected) < 1e-5).all()
+assert_matrix_eq(actual, expected, "output")
 

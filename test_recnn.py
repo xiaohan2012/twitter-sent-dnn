@@ -4,6 +4,8 @@ import theano.tensor as T
 
 from recnn import RNTN
 
+from test_util import assert_matrix_neq
+
 # tree
 # (4 (2 I) (4 (4 like) (2 you)))
 # word/phrase to index mapping
@@ -16,42 +18,77 @@ from recnn import RNTN
 # value definition
 tree_matrix = np.asarray(
     [
-        [1, 2], 
-        [0, 3],
+        [3, 1, 2], 
+        [4, 0, 3],
     ],
     dtype = np.int32
 )
+phrase_number = tree_matrix.shape[0]
 
-labels = np.asarray([2, 4, 2, 4, 4])
+labels = np.asarray([2, 4, 2, 4, 4], dtype=np.int32)
 
-word_embedding_val = np.asarray(
-    [
-        [0.1,0.1,0.1], # I
-        [1, 0, 0], # like
-        [0.1,0.1,0.1] # you
-    ],
-    dtype = theano.config.floatX
-)
+
+x = T.imatrix('x')
+y = T.ivector('y')
 
 classifier = RNTN(
-    tree_matrix = tree_matrix, 
-    labels = labels, 
-    vocab_size = 3, 
+    x, y,
+    vocab_size = 5, 
     embed_dim = 3, 
     label_n = 5,
 )
 
+# original_embedding = classifier.last_embedding.get_value()
 
-get_final_embedding = theano.function(
-    inputs = [], 
-    outputs = [classifier.final_embedding], 
-)
+# get_embedding = theano.function(
+#     inputs = [x],
+#     outputs = classifier.embedding
+# )
 
-print get_final_embedding()
+x_input = np.asarray([[1,-1,-1],
+                      [2,-1,-1],
+                      [3, 1, 2]],
+                     dtype=np.int32)
+y_input = labels[1:4]
 
-get_cost = theano.function(
-    inputs = [], 
-    outputs = [classifier.cost], 
-)
 
-print get_cost()
+original_embedding = classifier.embedding.get_value()
+
+classifier.update_embedding(x_input)
+
+new_embedding = classifier.embedding.get_value()
+
+assert_matrix_neq(original_embedding, 
+                  new_embedding,
+                  "update_embeding")
+
+
+original_params = [p.get_value() for p in classifier.params]
+
+classifier.train(x_input, y_input)
+updated_params = [p for p in classifier.params]
+
+for op, up in zip(original_params, updated_params):
+    assert_matrix_neq(op, up.get_value(), up.name)
+
+# get_cost = theano.function(
+#     inputs = [x,y], 
+#     outputs = classifier.cost, 
+# )
+
+# print get_cost(x_input, y_input)
+
+# one_iter = theano.function(
+#     inputs = [x, y],
+#     outputs = classifier.params,
+#     updates = classifier.updates
+# )
+
+
+# print one_iter(x_input, y_input)
+
+# assert_matrix_neq(new_embedding, 
+#                   original_embedding, 
+#                   "embedding")
+
+
