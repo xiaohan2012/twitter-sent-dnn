@@ -1,7 +1,7 @@
 import numpy as np
 import theano
 
-from dcnn import LogisticRegression
+from numpy_impl import LogisticRegression
 
 from logreg import LogisticRegression as TheanoLogisticRegression
 
