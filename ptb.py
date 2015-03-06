@@ -111,6 +111,21 @@ def flatten_tree(t):
             collect_words(t[1]) + collect_words(t[2]),
             t[0]
         )
+
+def get_leaves_with_labels(tree):
+    """return leaves in the tree, as well as their labels
+    >>> from ptb import parse
+    >>> t = parse("(4 (4 (2 A) (4 (3 (3 warm) (2 ,)) (3 funny))) (3 (2 ,) (3 (4 (4 engaging) (2 film)) (2 .))))")
+    >>> get_leaves_with_labels(t)
+    [('A', 2), ('warm', 3), (',', 2), ('funny', 3), (',', 2), ('engaging', 4), ('film', 2), ('.', 2)]
+    """
+    def aux(t):
+        if len(t) == 2: # leaf
+            return [(t[1], t[0])]
+        else:
+            return aux(t[1]) + aux(t[2])
+
+    return aux(tree)
     
 if __name__ == "__main__":
     import doctest
