@@ -2,7 +2,8 @@
 Numpy version of DCNN, used for prediction, instead of training
 """
 import numpy as np
-from numpy_impl import (conv2d, softmax)
+
+from numpy_impl import (conv2d, LogisticRegression)
 
 _MODEL_PATH = "models/filter_widths=10,7,,batch_size=10,,ks=20,5,,fold=1,1,,conv_layer_n=2,,ebd_dm=48,,nkerns=6,12,,dr=0.5,0.5,,l2_regs=1e-06,0.0001,1e-05,1e-06.pkl"
 
@@ -111,59 +112,6 @@ class ConvFoldingPoolLayer(object):
                     self.b[np.newaxis, :, np.newaxis, np.newaxis])
         
         return np.tanh(pool_out)
-
-class LogisticRegression(object):
-    def __init__(self, W, b):
-        """ Initialize the parameters of the logistic regression
-
-        :type input: theano.tensor.TensorType
-        :param input: symbolic variable that describes the input of the
-                      architecture (one minibatch)
-        :type W: numpy.ndarray
-        :param W: (input number, output/label number)
-
-        :type b: numpy.ndarray
-        :param b:
-n
-        """
-        assert W.shape[1] == b.shape[0]
-        assert W.ndim == 2
-        assert b.ndim == 1
-
-        self.W = W
-        self.b = b
-
-    def _p_y_given_x(self, x):
-        return softmax(np.dot(x, self.W) + self.b[np.newaxis, :])
-
-    def nnl(self, x, y):
-        """
-        negative log-likelihood
-
-        x: the input 2d array, (#instance, #feature)
-        y: the correct label, (#instance)
-        """
-        p_y_given_x = self._p_y_given_x(x)
-        return np.mean(
-            -np.log(p_y_given_x[np.arange(y.shape[0]), y])
-        )
-        
-    def errors(self, x, y):
-        """
-        the error rate
-
-        x: the input 2d array, (#instance, #feature)
-        y: the correct label, (#instance)
-        """
-        assert y.dtype == np.int32
-
-        pred_y = self.predict(x)
-
-        return np.sum(pred_y != y) / float(pred_y.shape[0])
-        
-    def predict(self, x):
-        p_y_given_x = self._p_y_given_x(x)
-        return np.argmax(p_y_given_x, axis = 1)
         
 class DCNN(object):
     def __init__(self, params):

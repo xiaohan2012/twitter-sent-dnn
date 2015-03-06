@@ -2,7 +2,7 @@ import numpy as np
 import theano
 import theano.tensor as T
 
-from recnn import RNTN
+from recnn_train import RNTN
 
 from test_util import assert_matrix_neq
 
@@ -51,7 +51,6 @@ x_input = np.asarray([[1,-1,-1],
                      dtype=np.int32)
 y_input = labels[1:4]
 
-
 original_embedding = classifier.embedding.get_value()
 
 classifier.update_embedding(x_input)
@@ -62,7 +61,6 @@ assert_matrix_neq(original_embedding,
                   new_embedding,
                   "update_embeding")
 
-
 original_params = [p.get_value() for p in classifier.params]
 
 classifier.train(x_input, y_input)
@@ -70,25 +68,3 @@ updated_params = [p for p in classifier.params]
 
 for op, up in zip(original_params, updated_params):
     assert_matrix_neq(op, up.get_value(), up.name)
-
-# get_cost = theano.function(
-#     inputs = [x,y], 
-#     outputs = classifier.cost, 
-# )
-
-# print get_cost(x_input, y_input)
-
-# one_iter = theano.function(
-#     inputs = [x, y],
-#     outputs = classifier.params,
-#     updates = classifier.updates
-# )
-
-
-# print one_iter(x_input, y_input)
-
-# assert_matrix_neq(new_embedding, 
-#                   original_embedding, 
-#                   "embedding")
-
-
