@@ -1,12 +1,12 @@
 import numpy as np
-from recnn import RNTNLayer
+from recnn_train import RNTNLayer as TheanoRNTNLayer
 import theano
 from test_util import assert_matrix_eq
 
 V_val = np.asarray((np.arange(3*6*6) / 100).reshape((3,6,6)), dtype=theano.config.floatX)
 W_val = np.asarray((np.arange(3*6) / 100).reshape((3,6)), dtype=theano.config.floatX)
 
-l = RNTNLayer(np.random.RandomState(1234), 3,
+theano_l = TheanoRNTNLayer(np.random.RandomState(1234), 3,
               V = theano.shared(value = V_val, 
                                 name = "V",
                                 borrow = True), 
@@ -24,17 +24,10 @@ right_input = np.asarray([[0,1,0]], dtype=theano.config.floatX)
 # NUMPY IMPML ##
 ################
 
-concat_vec = np.concatenate(
-    [left_input, right_input],
-    axis = 1
-)
+from recnn import RNTNLayer as NumpyRNTNLayer
+numpy_l = NumpyRNTNLayer(theano_l.V.get_value(), theano_l.W.get_value())
 
-
-result = np.tanh(np.dot(concat_vec, np.tensordot(V_val, np.transpose(concat_vec), [2, 0])) + np.dot(W_val, np.transpose(concat_vec)))
-
-expected = np.squeeze(result)
-
-print expected.shape
+actual = numpy_l.output(left_input, right_input)
 
 ################
 # THEANO PART  #
@@ -45,10 +38,10 @@ right = theano.tensor.drow("right")
 
 f = theano.function(
     inputs = [left, right],
-    outputs = l.output(left, right)
+    outputs = theano_l.output(left, right)
 )
 
-actual = f(left_input, right_input)
+expected = f(left_input, right_input)
 
 assert_matrix_eq(actual, expected, "output")
 
