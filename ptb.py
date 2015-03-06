@@ -126,6 +126,19 @@ def get_leaves_with_labels(tree):
             return aux(t[1]) + aux(t[2])
 
     return aux(tree)
+
+def load_trees(readable):
+    """
+    Load trees from file-like object
+
+    >>> from codecs import open
+    >>> trees = load_trees(open("data/trees_test.txt", "r", "utf8"))
+    >>> len(trees)
+    2
+    >>> trees[0]
+    (2, (2, (2, (2, u'to'), (2, (2, u'be'), (2, (2, u'the'), (2, (2, u'21st'), (2, (2, (2, u'Century'), (2, u"'s")), (2, (3, u'new'), (2, (2, u'``'), (2, u'Conan')))))))), (2, u"''")), (2, u'and'))
+    """
+    return [parse(l.strip()) for l in readable]
     
 if __name__ == "__main__":
     import doctest
