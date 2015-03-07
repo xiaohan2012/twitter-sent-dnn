@@ -76,6 +76,13 @@ class RNTN(object):
         self.logreg_layer = logreg_layer
         self.word2id = word2id
 
+    @classmethod
+    def load_from_theano_model(cls, model, word2id):
+        return RNTN(embedding = model.embedding.get_value(), 
+                    rntn_layer = RNTNLayer(model.rntn_layer.V.get_value(), model.rntn_layer.W.get_value()), 
+                    logreg_layer = LogisticRegression(model.logreg_layer.W.get_value(), model.logreg_layer.b.get_value()), 
+                    word2id = word2id)
+
     def get_node_vector(self, node):
         if isinstance(node, tuple): # is internal node
             assert len(node) == 3

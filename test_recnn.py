@@ -23,10 +23,11 @@ y = T.ivector('y')
 
 th_model = TheanoRNTN(x, y, vocab_size, embed_dim, label_n)
 
-np_model = NumpyRNTN(embedding = th_model.embedding.get_value(), 
-                     rntn_layer = RNTNLayer(th_model.rntn_layer.V.get_value(), th_model.rntn_layer.W.get_value()), 
-                     logreg_layer = LogisticRegression(th_model.logreg_layer.W.get_value(), th_model.logreg_layer.b.get_value()), 
-                     word2id = word2id)
+
+np_model = NumpyRNTN.load_from_theano_model(th_model, word2id)# (embedding = th_model.embedding.get_value(), 
+                     # rntn_layer = RNTNLayer(th_model.rntn_layer.V.get_value(), th_model.rntn_layer.W.get_value()), 
+                     # logreg_layer = LogisticRegression(th_model.logreg_layer.W.get_value(), th_model.logreg_layer.b.get_value()), 
+                     # word2id = word2id)
 
 x_input = np.asarray([[4, 2, 5], 
                       [3, 1, 4]],
