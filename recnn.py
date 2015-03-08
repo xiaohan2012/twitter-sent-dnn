@@ -85,10 +85,14 @@ class RNTN(object):
 
     def get_node_vector(self, node):
         if isinstance(node, tuple): # is internal node
-            assert len(node) == 3
-            left_node_vector = self.get_node_vector(node[1])
-            right_node_vector = self.get_node_vector(node[2])
-            return self.rntn_layer.output(left_node_vector, right_node_vector)
+            if len(node) == 3:
+                left_node_vector = self.get_node_vector(node[1])
+                right_node_vector = self.get_node_vector(node[2])
+                return self.rntn_layer.output(left_node_vector, right_node_vector)
+            elif len(node) == 2:
+               return self.get_node_vector(node[1])
+            else:
+                raise ValueError("Invalid tuple length(should be 2 or 3)")
         else:
             assert isinstance(node, basestring)
             idx = (self.word2id[node] 
@@ -97,6 +101,11 @@ class RNTN(object):
             
             return self.embedding[idx]
 
-    def predict(self, node):
+    def predict_all_nodes(self, nodes):
+        raise NotImplementedError
+
+    def predict_top_node(self, node):
         vec = self.get_node_vector(node)
-        return self.logreg_layer.predict(vec)
+        return self.logreg_layer.predict(vec)[0]
+
+

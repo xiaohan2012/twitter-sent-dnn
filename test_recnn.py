@@ -33,10 +33,20 @@ x_input = np.asarray([[4, 2, 5],
                       [3, 1, 4]],
                      dtype=np.int32)
 
-actual = np_model.get_node_vector((("love", ("you", "bro")), "love", (("you", "bro"), "you", "bro")))
+tree_input = (5, "love", (3, (3, "you"), (3, "bro")))
+actual = np_model.get_node_vector(tree_input)
 
 th_model.update_embedding(x_input)
 
 expected = th_model.embedding.get_value()[3]
 
 assert_matrix_eq(actual, expected, "node vector")
+
+get_label = theano.function(inputs = [x], 
+                            outputs = th_model.logreg_layer.pred_y)
+
+score = np_model.predict_top_node(tree_input)
+
+assert isinstance(score, np.int64)
+
+assert_matrix_eq(score, get_label(x_input[1:2,:]), 'logreg.predict')
