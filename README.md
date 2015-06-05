@@ -7,8 +7,11 @@ A web app that allows to:
 - gain an overview of the "positiveness" of [hashtags](https://support.twitter.com/articles/49309-using-hashtags-on-twitter#)
 
 ## How to use it::
+
 >> from sentiment import sentiment_score
+
 >> print sentiment_score(u"I love you")
+
 0.9999
 
 ## Demo
