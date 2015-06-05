@@ -1,4 +1,4 @@
-#Twitter Sentiment Analysis using Convolutional Neural Network(CNN)
+#Twitter Sentiment Analysis using ConvNet
 
 A web app that allows to:
 
