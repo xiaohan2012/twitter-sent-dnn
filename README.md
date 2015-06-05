@@ -1,5 +1,4 @@
-# twitter-sent-dnn
-Twitter Sentiment Analysis using Convolutional Neural Network(CNN)
+#Twitter Sentiment Analysis using Convolutional Neural Network(CNN)
 
 A web app that allows to:
 
