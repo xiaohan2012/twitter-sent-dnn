@@ -13,6 +13,7 @@ A web app that allows to:
 0.9999
 ```
 
+return a sentiment index ranging from 0 (negative sentiment) to 1 (positive sentiment). 
 
 ## Demo
 
