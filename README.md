@@ -17,6 +17,10 @@ It returns a sentiment index ranging from 0 (negative sentiment) to 1 (positive 
 
 ## Online Demo
 
+- predict sentiment "positiveness" for single tweets
+- gain an overview of the "positiveness" of [hashtags](https://support.twitter.com/articles/49309-using-hashtags-on-twitter#)
+
+
 Click [here](https://twitter-sentiment-cnn.herokuapp.com/)
 
 ## Algorithm
