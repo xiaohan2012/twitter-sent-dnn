@@ -1,9 +1,9 @@
 #Twitter Sentiment Analysis using ConvNet
 
-A web app that allows to:
+A tool to 
 
 - predict sentiment "positiveness" for tweets
-- gain an overview of the "positiveness" of [hashtags](https://support.twitter.com/articles/49309-using-hashtags-on-twitter#)
+
 
 ## How to use it?
 
@@ -15,7 +15,7 @@ A web app that allows to:
 
 It returns a sentiment index ranging from 0 (negative sentiment) to 1 (positive sentiment). 
 
-## Demo
+## Online Demo
 
 Click [here](https://twitter-sentiment-cnn.herokuapp.com/)
 
