@@ -2,9 +2,9 @@ import numpy as np
 import theano
 import theano.tensor as T
 
-from recnn_train import RNTN
+from .recnn_train import RNTN
 
-from test_util import assert_matrix_neq
+from .test_util import assert_matrix_neq
 
 # tree
 # (4 (2 I) (4 (4 like) (2 you)))
@@ -18,10 +18,10 @@ from test_util import assert_matrix_neq
 # value definition
 tree_matrix = np.asarray(
     [
-        [3, 1, 2], 
+        [3, 1, 2],
         [4, 0, 3],
     ],
-    dtype = np.int32
+    dtype=np.int32
 )
 phrase_number = tree_matrix.shape[0]
 
@@ -33,13 +33,13 @@ y = T.ivector('y')
 
 classifier = RNTN(
     x, y,
-    vocab_size = 5, 
-    embed_dim = 3, 
-    label_n = 5,
+    vocab_size=5,
+    embed_dim=3,
+    label_n=5,
 )
 
-x_input = np.asarray([[1,-1,-1],
-                      [2,-1,-1],
+x_input = np.asarray([[1, -1, -1],
+                      [2, -1, -1],
                       [3, 1, 2]],
                      dtype=np.int32)
 y_input = labels[1:4]
@@ -50,7 +50,7 @@ classifier.update_embedding(x_input)
 
 new_embedding = classifier.embedding.get_value()
 
-assert_matrix_neq(original_embedding, 
+assert_matrix_neq(original_embedding,
                   new_embedding,
                   "update_embeding")
 
