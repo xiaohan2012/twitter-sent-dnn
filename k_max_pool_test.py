@@ -1,4 +1,5 @@
-import sys, pdb
+import sys
+import pdb
 import numpy as np
 import theano
 import theano.tensor as T
@@ -8,30 +9,33 @@ feat_n = 2
 k = T.iscalar('k')
 x = T.tensor4('x')
 
-ind = T.argsort(x, axis = 3)
+ind = T.argsort(x, axis=3)
 
-sorted_ind = T.sort(ind[:,:,:, -k:], axis = 3)
+sorted_ind = T.sort(ind[:, :, :, -k:], axis=3)
 
 dim0, dim1, dim2, dim3 = sorted_ind.shape
 
 indices_dim0 = T.arange(dim0).repeat(dim1 * dim2 * dim3)
-indices_dim1 = T.arange(dim1).repeat(dim2 * dim3).reshape((dim1*dim2*dim3, 1)).repeat(dim0, axis=1).T.flatten()
-indices_dim2 = T.arange(dim2).repeat(dim3).reshape((dim2*dim3, 1)).repeat(dim0 * dim1, axis = 1).T.flatten()
+indices_dim1 = T.arange(dim1).repeat(
+    dim2 * dim3).reshape((dim1 * dim2 * dim3, 1)).repeat(dim0, axis=1).T.flatten()
+indices_dim2 = T.arange(dim2).repeat(dim3).reshape(
+    (dim2 * dim3, 1)).repeat(dim0 * dim1, axis=1).T.flatten()
 
 k_max_pool = theano.function(
-    inputs = [x,k], 
-    outputs = x[indices_dim0, indices_dim1, indices_dim2, sorted_ind.flatten()].reshape(sorted_ind.shape)
+    inputs=[x, k],
+    outputs=x[indices_dim0, indices_dim1, indices_dim2,
+              sorted_ind.flatten()].reshape(sorted_ind.shape)
 )
 
-in_x = np.random.RandomState(1).rand(2, feat_n, 4,4)
+in_x = np.random.RandomState(1).rand(2, feat_n, 4, 4)
 in_k = 2
-print "in_x:"
-print in_x
+print("in_x:")
+print(in_x)
 
-print "theano output....\n"
-print k_max_pool(in_x, in_k)
+print("theano output....\n")
+print(k_max_pool(in_x, in_k))
 
-print "numpy output....\n"
+print("numpy output....\n")
 
 # k-max pooling is different from merely sorting
 # it selects the k largest items at certain axis but the original order should be maintained
@@ -44,9 +48,9 @@ print "numpy output....\n"
 # get the k largest items out and form a 1d array
 # reshape the 1d arracy into the 4d tensor
 
-ind = np.argsort(in_x, axis = 3)
+ind = np.argsort(in_x, axis=3)
 
-sorted_ind = np.sort(ind[:, :, :, -in_k:], axis = 3)
+sorted_ind = np.sort(ind[:, :, :, -in_k:], axis=3)
 
 
 # for 2 data instances, 2 feature maps
@@ -58,15 +62,15 @@ sorted_ind = np.sort(ind[:, :, :, -in_k:], axis = 3)
 dim0, dim1, dim2, dim3 = sorted_ind.shape
 
 indices_dim0 = np.arange(dim0).repeat(dim1 * dim2 * dim3)
-indices_dim1 = np.arange(dim1).repeat(dim2 * dim3).reshape((dim1*dim2*dim3, 1)).repeat(dim0, axis = 1).transpose().flatten()
-indices_dim2 = np.arange(dim2).repeat(dim3).reshape((dim2*dim3, 1)).repeat(dim0 * dim1, axis = 1).transpose().flatten()
+indices_dim1 = np.arange(dim1).repeat(
+    dim2 * dim3).reshape((dim1 * dim2 * dim3, 1)).repeat(dim0, axis=1).transpose().flatten()
+indices_dim2 = np.arange(dim2).repeat(dim3).reshape(
+    (dim2 * dim3, 1)).repeat(dim0 * dim1, axis=1).transpose().flatten()
 
-print indices_dim0, indices_dim1, indices_dim2
+print(indices_dim0, indices_dim1, indices_dim2)
 
 
-print in_x[indices_dim0, 
-           indices_dim1, 
+print(in_x[indices_dim0,
+           indices_dim1,
            indices_dim2,
-           sorted_ind.flatten()].reshape(sorted_ind.shape)
-
-
+           sorted_ind.flatten()].reshape(sorted_ind.shape))

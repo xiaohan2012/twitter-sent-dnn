@@ -1,5 +1,6 @@
-from ptb import get_leaves_with_labels
+from .ptb import get_leaves_with_labels
 from collections import Counter
+
 
 def token_freq(trees):
     """
@@ -13,6 +14,6 @@ def token_freq(trees):
     counter = Counter()
     for tree in trees:
         leaves = get_leaves_with_labels(tree)
-        counter += Counter([token for token, label in  leaves])
+        counter += Counter([token for token, label in leaves])
 
     return counter
